@@ -191,17 +191,23 @@ async fn settle(view: &Paper, width: i32) {
     if !drawn.get() {
         tick.remove();
     }
+    // Taller than any note first: GTK measures every line on screen as it is allocated, all of
+    // them then, rather than a few in the background between frames.
     let mut last = -1;
-    for _ in 0..200 {
+    for _ in 0..20 {
+        view.size_allocate(&place(width, TALLEST), -1);
         let (_, height, _, _) = view.measure(gtk::Orientation::Vertical, width);
+        view.size_allocate(&place(width, height), -1);
         if height == last {
             return;
         }
-        view.size_allocate(&place(width, height), -1);
         last = height;
         glib::timeout_future(Duration::from_millis(10)).await;
     }
 }
+
+/// Taller than any note is laid out, in pixels: some 4,000 pages.
+const TALLEST: i32 = 4_000_000;
 
 /// Where the view is laid out: left of the window, out of sight.
 fn place(width: i32, height: i32) -> gdk::Rectangle {

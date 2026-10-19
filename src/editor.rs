@@ -1535,7 +1535,8 @@ impl Editor {
     pub async fn print(self: Rc<Self>, pdf: Option<gio::File>) {
         let text = self.text();
         let find = |path: &str| self.find(path);
-        let content = if self.styler.is_enabled() {
+        // By its name too: a note just opened is styled as Markdown only once it is shown.
+        let content = if self.styler.is_enabled() || self.location().is_some_and(|l| is_markdown(&l)) {
             print::Content::Markdown { text: &text, folder: self.location().and_then(|l| l.parent()), find: &find }
         } else {
             print::Content::Plain { text: &text, language: self.buffer.language() }
