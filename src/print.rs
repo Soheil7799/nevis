@@ -191,10 +191,14 @@ async fn settle(view: &Paper, width: i32) {
     if !drawn.get() {
         tick.remove();
     }
-    // Taller than any note first: GTK measures every line on screen as it is allocated, all of
-    // them then, rather than a few in the background between frames.
+    // Taller than any note first: allocated with its lines changed, GTK measures the lines on
+    // screen at once, all of them then, rather than a few in the background between frames.
+    // (A margin moved there and back is a change; unchanged, an allocation measures nothing.)
     let mut last = -1;
     for _ in 0..20 {
+        let margin = view.left_margin();
+        view.set_left_margin(margin + 1);
+        view.set_left_margin(margin);
         view.size_allocate(&place(width, TALLEST), -1);
         let (_, height, _, _) = view.measure(gtk::Orientation::Vertical, width);
         view.size_allocate(&place(width, height), -1);
