@@ -27,6 +27,7 @@ mod picker;
 mod popup;
 mod positions;
 mod prefs;
+mod print;
 mod paper;
 mod prompt;
 mod render;
@@ -127,6 +128,8 @@ fn install_actions(app: &gtk::Application) {
         ("win.open", &["<Ctrl>o"]),
         ("win.save", &["<Ctrl>s"]),
         ("win.save-as", &["<Ctrl><Shift>s"]),
+        ("win.export-pdf", &["<Ctrl><Shift>e"]),
+        ("win.print", &["<Ctrl><Alt>p"]),
         ("win.close", &["<Ctrl>w"]),
         ("win.close-window", &["<Ctrl><Shift>w"]),
         ("win.new-tab", &["<Ctrl>t"]),

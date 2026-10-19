@@ -18,7 +18,7 @@ use crate::session::{self, TabState};
 use crate::window::{How, Window};
 use crate::complete::{self, Completion, Context, Offer};
 use crate::spelling::Spelling;
-use crate::{anchors, attachments, backlinks, daily, devhooks, find::FindBar, links, listing, lists, names, obsidian, outline, positions, settings, style, switcher, theme, vault};
+use crate::{anchors, attachments, backlinks, daily, devhooks, find::FindBar, links, listing, lists, names, obsidian, outline, positions, print, settings, style, switcher, theme, vault};
 
 pub struct Editor {
     /// The window the tab is in: dialogs, frames and the title go there.
@@ -1528,6 +1528,40 @@ impl Editor {
         self.watch();
         crate::window::store_soon();
         saved
+    }
+
+    /// Prints the note (a Markdown note as the rendered view shows it), or with `pdf` writes it
+    /// to that file as a PDF.
+    pub async fn print(self: Rc<Self>, pdf: Option<gio::File>) {
+        let text = self.text();
+        let find = |path: &str| self.find(path);
+        let content = if self.styler.is_enabled() {
+            print::Content::Markdown { text: &text, folder: self.location().and_then(|l| l.parent()), find: &find }
+        } else {
+            print::Content::Plain { text: &text, language: self.buffer.language() }
+        };
+        if let Err(error) = print::print(&self.window, &self.layer, &self.print_name(), content, pdf).await {
+            alert(&self.window, "Couldn't print", &error);
+        }
+    }
+
+    /// Asks where, then writes the note there as a PDF (see `print`).
+    pub async fn export_pdf(self: Rc<Self>) {
+        let name = self.print_name();
+        let stem = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
+        let dialog = gtk::FileDialog::builder().title("Export as PDF").modal(true).initial_name(format!("{stem}.pdf")).build();
+        if let Some(folder) = self.location().and_then(|l| l.parent()) {
+            dialog.set_initial_folder(Some(&folder));
+        }
+        let Ok(file) = dialog.save_future(Some(&self.window)).await else { return };
+        self.print(Some(file)).await;
+    }
+
+    /// The file's name, or what an unsaved note would be named.
+    fn print_name(&self) -> String {
+        self.location()
+            .and_then(|l| l.basename())
+            .map_or_else(|| self.untitled_name().replace('/', "-"), |name| name.to_string_lossy().into_owned())
     }
 
     /// The selected words become a link to `address`: [words](address).

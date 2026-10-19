@@ -397,6 +397,8 @@ impl Window {
         self.on_current("open", |w, _| spawn(w.clone().open_dialog()));
         self.on_current("save", |_, e| spawn(e.save()));
         self.on_current("save-as", |_, e| spawn(e.save_as()));
+        self.on_current("print", |_, e| spawn(e.print(None)));
+        self.on_current("export-pdf", |_, e| spawn(e.export_pdf()));
         self.on_current("find", |_, e| {
             e.set_reading(false);
             e.find_bar().show(false);
@@ -1551,6 +1553,8 @@ fn build_menu() -> gio::Menu {
         ("Open Folder…", "win.open-folder"),
         ("Save", "win.save"),
         ("Save As…", "win.save-as"),
+        ("Export as PDF…", "win.export-pdf"),
+        ("Print…", "win.print"),
     ]));
     menu.append_section(None, &section(&[("Find…", "win.find"), ("Reading View", "win.reading")]));
     menu.append_section(None, &section(&[("Settings…", "win.settings"), ("Keyboard Shortcuts", "win.shortcuts")]));

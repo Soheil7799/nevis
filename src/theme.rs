@@ -84,6 +84,20 @@ pub fn colors() -> Rc<Colors> {
     })
 }
 
+/// Runs `f` with `colors` in use instead of the palette's (printing: dark on white paper).
+pub fn with_colors<R>(colors: Rc<Colors>, f: impl FnOnce() -> R) -> R {
+    let before = COLORS.with_borrow_mut(|slot| slot.replace(colors));
+    let result = f();
+    COLORS.with_borrow_mut(|slot| *slot = before);
+    result
+}
+
+/// The colours for paper, whatever the palette: GitHub Light's, on white.
+pub fn paper_colors() -> Rc<Colors> {
+    let palette = palettes::built_in().into_iter().find(|p| p.id == "github-light").expect("GitHub Light is built in");
+    Rc::new(Colors::from(&palette))
+}
+
 pub fn scheme() -> Option<sourceview::StyleScheme> {
     StyleSchemeManager::default().scheme(SCHEME_ID)
 }

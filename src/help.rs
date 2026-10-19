@@ -27,6 +27,8 @@ const LEFT: &[(&str, &[Row])] = &[
         row("Search in the folder", "win.search", ""),
         row("Save", "win.save", ""),
         row("Save as", "win.save-as", ""),
+        row("Export as PDF", "win.export-pdf", ""),
+        row("Print", "win.print", ""),
         row("Close tab", "win.close", ""),
         row("Reopen closed tab", "win.reopen-tab", ""),
         row("Close window", "win.close-window", ""),
