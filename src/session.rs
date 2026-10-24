@@ -117,6 +117,37 @@ pub fn store(session: &Session) {
     }
 }
 
+/// `windows` as one window: all their tabs in order, a file open in several once (with its
+/// unsaved text, if one has some), the first folder any showed, and the first window's tab in
+/// front. A session comes back as tabs, not as a window for every file once opened.
+pub fn merged(windows: Vec<WindowState>) -> Option<WindowState> {
+    let folder = windows.iter().find_map(|window| window.folder.clone());
+    let mut tabs: Vec<TabState> = Vec::new();
+    let mut active = None;
+    for (n, window) in windows.into_iter().enumerate() {
+        for (i, tab) in window.tabs.into_iter().enumerate() {
+            let front = n == 0 && i == window.active;
+            let twin = tab.path.as_ref().and_then(|path| tabs.iter().position(|t| t.path.as_ref() == Some(path)));
+            let at = match twin {
+                Some(at) => {
+                    if tabs[at].draft.is_none() && tab.draft.is_some() {
+                        tabs[at] = tab;
+                    }
+                    at
+                }
+                None => {
+                    tabs.push(tab);
+                    tabs.len() - 1
+                }
+            };
+            if front {
+                active = Some(at);
+            }
+        }
+    }
+    (!tabs.is_empty()).then(|| WindowState { folder, active: active.unwrap_or(0), tabs })
+}
+
 /// A name for a new draft.
 pub fn new_draft_name() -> String {
     format!("{:08x}{:08x}", gtk::glib::random_int(), gtk::glib::random_int())
@@ -183,6 +214,26 @@ mod tests {
             ],
         };
         assert_eq!(Session::parse(&session.to_text()), session);
+    }
+
+    #[test]
+    fn a_session_of_many_windows_comes_back_as_one_with_all_their_tabs() {
+        let a = tab(Some("/n/a.md"), None, 1, 0, false);
+        let b = tab(Some("/n/b.md"), None, 2, 0, true);
+        let draft = tab(None, Some("3fa9c2"), 0, 0, false);
+        let a_unsaved = tab(Some("/n/a.md"), Some("77"), 5, 0, false);
+        let windows = vec![
+            WindowState { folder: None, active: 1, tabs: vec![a.clone(), b.clone()] },
+            WindowState { folder: Some("/n".into()), active: 0, tabs: vec![draft.clone(), a_unsaved.clone()] },
+            WindowState { folder: Some("/other".into()), active: 0, tabs: vec![b.clone()] },
+        ];
+        // The first folder any had; a file open twice once, its unsaved text kept; the first
+        // window's tab in front.
+        assert_eq!(
+            merged(windows),
+            Some(WindowState { folder: Some("/n".into()), active: 1, tabs: vec![a_unsaved, b, draft] })
+        );
+        assert_eq!(merged(Vec::new()), None);
     }
 
     #[test]

@@ -1327,41 +1327,45 @@ fn restore_or_new(app: &gtk::Application) -> Rc<Window> {
     })
 }
 
-/// Brings `windows` back, each tab loading when first shown (`load`: the tab in front now).
-/// Tabs already open in another window aren't doubled. The first window, if any.
+/// Brings `windows` back as one window of tabs (`session::merged`), each tab loading when
+/// first shown (`load`: the tab in front now). Tabs already open in another window aren't
+/// doubled. The window, if any.
 fn restore(app: &gtk::Application, windows: Vec<WindowState>, load: bool) -> Option<Rc<Window>> {
-    let mut first = None;
-    for state in windows {
-        // A file deleted since comes back only if it has unsaved text.
-        let tabs: Vec<_> = state
-            .tabs
-            .into_iter()
-            .filter(|tab| tab.draft.is_some() || tab.path.as_ref().is_some_and(|p| p.exists()))
-            .filter(|tab| tab.path.as_ref().is_none_or(|p| find_tab(&gio::File::for_path(p)).is_none()))
-            .collect();
-        if tabs.is_empty() {
-            continue;
+    let state = session::merged(windows)?;
+    // A file deleted since comes back only if it has unsaved text.
+    let keep = |tab: &session::TabState| {
+        (tab.draft.is_some() || tab.path.as_ref().is_some_and(|p| p.exists()))
+            && tab.path.as_ref().is_none_or(|p| find_tab(&gio::File::for_path(p)).is_none())
+    };
+    let (mut active, mut tabs) = (0, Vec::new());
+    for (i, tab) in state.tabs.into_iter().enumerate() {
+        if keep(&tab) {
+            if i <= state.active {
+                active = tabs.len();
+            }
+            tabs.push(tab);
         }
-        let window = Window::new(app);
-        window.restoring.set(true);
-        if let Some(folder) = state.folder {
-            window.show_folder(&gio::File::for_path(folder));
-        }
-        let active = state.active.min(tabs.len() - 1);
-        for tab in tabs {
-            window.add_tab(Editor::restored(&window, tab), false);
-        }
-        if let Some(editor) = window.tabs().get(active).cloned() {
-            window.select(&editor);
-        }
-        window.restoring.set(false);
-        if load && let Some(editor) = window.current() {
-            editor.ensure_loaded();
-        }
-        window.window.present();
-        first.get_or_insert(window);
     }
-    first
+    if tabs.is_empty() {
+        return None;
+    }
+    let window = Window::new(app);
+    window.restoring.set(true);
+    if let Some(folder) = state.folder {
+        window.show_folder(&gio::File::for_path(folder));
+    }
+    for tab in tabs {
+        window.add_tab(Editor::restored(&window, tab), false);
+    }
+    if let Some(editor) = window.tabs().get(active).cloned() {
+        window.select(&editor);
+    }
+    window.restoring.set(false);
+    if load && let Some(editor) = window.current() {
+        editor.ensure_loaded();
+    }
+    window.window.present();
+    Some(window)
 }
 
 /// Writes the session soon; edits and tab changes come in bursts.
