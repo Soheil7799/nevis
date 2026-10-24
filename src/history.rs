@@ -78,9 +78,81 @@ pub fn when(time_ms: i64) -> String {
     }
 }
 
+/// A note (or a folder of notes) moved from `from` to `to`: its versions go with it.
+pub fn moved(from: &Path, to: &Path) {
+    let Ok(entries) = std::fs::read_dir(crate::positions::state_dir().join("history")) else { return };
+    for entry in entries.flatten() {
+        let Ok(owner) = std::fs::read_to_string(entry.path().join("path")) else { continue };
+        let Ok(below) = Path::new(&owner).strip_prefix(from) else { continue };
+        let note = if below.as_os_str().is_empty() { to.to_path_buf() } else { to.join(below) };
+        let target = folder(&note);
+        if target.exists() || std::fs::rename(entry.path(), &target).is_err() {
+            continue;
+        }
+        let _ = std::fs::write(target.join("path"), note.to_string_lossy().as_bytes());
+    }
+}
+
+/// A line of what going back to a version changes.
+#[derive(Debug, PartialEq)]
+pub enum Line<'a> {
+    Same(&'a str),
+    /// In the version, not in the note now: it comes back.
+    Back(&'a str),
+    /// In the note now, not in the version: it goes.
+    Gone(&'a str),
+}
+
+/// What changes from `now` to `version`, line by line (the longest run of lines both share
+/// kept); `None` when they are too long to compare quickly.
+pub fn changes<'a>(now: &'a str, version: &'a str) -> Option<Vec<Line<'a>>> {
+    let (a, b): (Vec<&str>, Vec<&str>) = (now.lines().collect(), version.lines().collect());
+    // The lines both start and end with, set aside: usually most of a note.
+    let head = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let tail = a[head..].iter().rev().zip(b[head..].iter().rev()).take_while(|(x, y)| x == y).count();
+    let (x, y) = (&a[head..a.len() - tail], &b[head..b.len() - tail]);
+    if x.len().saturating_mul(y.len()) > 4_000_000 {
+        return None;
+    }
+    // longest[i][j]: the most lines x[i..] and y[j..] share, in order.
+    let mut longest = vec![vec![0u32; y.len() + 1]; x.len() + 1];
+    for i in (0..x.len()).rev() {
+        for j in (0..y.len()).rev() {
+            longest[i][j] = if x[i] == y[j] { longest[i + 1][j + 1] + 1 } else { longest[i + 1][j].max(longest[i][j + 1]) };
+        }
+    }
+    let mut lines: Vec<Line> = a[..head].iter().map(|line| Line::Same(line)).collect();
+    let (mut i, mut j) = (0, 0);
+    while i < x.len() || j < y.len() {
+        if i < x.len() && j < y.len() && x[i] == y[j] {
+            lines.push(Line::Same(x[i]));
+            (i, j) = (i + 1, j + 1);
+        } else if j < y.len() && (i == x.len() || longest[i][j + 1] >= longest[i + 1][j]) {
+            lines.push(Line::Back(y[j]));
+            j += 1;
+        } else {
+            lines.push(Line::Gone(x[i]));
+            i += 1;
+        }
+    }
+    lines.extend(a[a.len() - tail..].iter().map(|line| Line::Same(line)));
+    Some(lines)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn going_back_shows_the_lines_that_come_back_and_those_that_go() {
+        let now = "# Plan\nkeep\nnew line\nend";
+        let version = "# Plan\nold line\nkeep\nend";
+        assert_eq!(
+            changes(now, version),
+            Some(vec![Line::Same("# Plan"), Line::Back("old line"), Line::Same("keep"), Line::Gone("new line"), Line::Same("end")])
+        );
+        assert_eq!(changes("same", "same"), Some(vec![Line::Same("same")]));
+    }
 
     const MIN: i64 = 60 * 1000;
 

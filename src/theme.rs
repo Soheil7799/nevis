@@ -356,6 +356,7 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-switcher > entry {{ background: none; border: none; box-shadow: none; outline: none; border-radius: 0;
              padding: 6px 8px 10px 8px; font-size: 1.05em; border-bottom: 1px solid {border}; margin-bottom: 2px; }}
          .nevis-switcher-list {{ background: transparent; }}
+         .nevis-preview, .nevis-preview > text {{ background: alpha({text}, 0.04); border-radius: 8px; font-size: 0.9em; }}
          .nevis-outline-top {{ font-weight: 600; }}
          .nevis-complete {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 4px;
              box-shadow: 0 6px 18px alpha(black, 0.28); }}

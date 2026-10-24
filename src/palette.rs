@@ -20,7 +20,14 @@ pub struct Palette {
     /// Which commands the list shows, in order.
     shown: RefCell<Vec<usize>>,
     run: Run,
+    /// Under the list, for some lists: what the selected command would do (`show_previewed`).
+    preview: gtk::TextView,
+    preview_scroller: gtk::ScrolledWindow,
+    previewer: RefCell<Option<Previewer>>,
 }
+
+/// Fills the preview's buffer for a command's action.
+type Previewer = Box<dyn Fn(&str, &gtk::TextBuffer)>;
 
 impl Palette {
     pub fn new(run: impl Fn(&str) + 'static) -> Rc<Self> {
@@ -36,8 +43,42 @@ impl Palette {
         let (widget, card) = popup::card(520);
         card.append(&entry);
         card.append(&scroller);
+        let preview = gtk::TextView::builder()
+            .editable(false)
+            .cursor_visible(false)
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .top_margin(8)
+            .bottom_margin(8)
+            .left_margin(10)
+            .right_margin(10)
+            .css_classes(["nevis-preview"])
+            .build();
+        let preview_scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .min_content_height(220)
+            .max_content_height(220)
+            .child(&preview)
+            .visible(false)
+            .build();
+        card.append(&preview_scroller);
         popup::browse_with_arrows(&widget, &list, &entry);
-        let palette = Rc::new(Self { widget, entry, list, commands: RefCell::new(Vec::new()), shown: RefCell::new(Vec::new()), run: Box::new(run) });
+        let palette = Rc::new(Self {
+            widget,
+            entry,
+            list,
+            commands: RefCell::new(Vec::new()),
+            shown: RefCell::new(Vec::new()),
+            run: Box::new(run),
+            preview,
+            preview_scroller,
+            previewer: RefCell::new(None),
+        });
+        let weak = Rc::downgrade(&palette);
+        palette.list.connect_row_selected(move |_, row| {
+            if let (Some(palette), Some(row)) = (weak.upgrade(), row) {
+                palette.show_preview(row.index() as usize);
+            }
+        });
         let weak = Rc::downgrade(&palette);
         palette.entry.connect_changed(move |_| {
             if let Some(palette) = weak.upgrade() {
@@ -65,6 +106,27 @@ impl Palette {
 
     /// Opens on `commands`, those that can run now.
     pub fn show(&self, commands: Vec<Command>, placeholder: &str) {
+        self.previewer.take();
+        self.show_list(commands, placeholder);
+    }
+
+    /// Opens on `commands` with a preview under the list, which `previewer` fills for the
+    /// selected one's action.
+    pub fn show_previewed(&self, commands: Vec<Command>, placeholder: &str, previewer: impl Fn(&str, &gtk::TextBuffer) + 'static) {
+        *self.previewer.borrow_mut() = Some(Box::new(previewer));
+        self.show_list(commands, placeholder);
+    }
+
+    fn show_preview(&self, row: usize) {
+        let action = self.shown.borrow().get(row).and_then(|&index| self.commands.borrow().get(index).map(|command| command.action.clone()));
+        if let (Some(previewer), Some(action)) = (self.previewer.borrow().as_ref(), action) {
+            previewer(&action, &self.preview.buffer());
+            self.preview.scroll_to_iter(&mut self.preview.buffer().start_iter(), 0.0, false, 0.0, 0.0);
+        }
+    }
+
+    fn show_list(&self, commands: Vec<Command>, placeholder: &str) {
+        self.preview_scroller.set_visible(self.previewer.borrow().is_some());
         *self.commands.borrow_mut() = commands;
         self.entry.set_placeholder_text(Some(placeholder));
         self.entry.set_text("");

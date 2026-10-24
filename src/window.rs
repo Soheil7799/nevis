@@ -419,7 +419,14 @@ impl Window {
                 return alert(&w.window, "No earlier versions yet", "nevis keeps a version each time a note is saved (one every ten minutes at most).");
             }
             if let Some(palette) = w.palette_popup() {
-                palette.show(versions, "Go back to the version from…");
+                // Under the list: what going back to the selected one changes.
+                let editor = Rc::downgrade(&e);
+                palette.show_previewed(versions, "Go back to the version from…", move |action, buffer| {
+                    let version = gio::Action::parse_detailed_name(action).ok().and_then(|(_, target)| target?.get::<String>());
+                    if let (Some(editor), Some(version)) = (editor.upgrade(), version) {
+                        editor.preview_version(std::path::Path::new(&version), buffer);
+                    }
+                });
             }
         });
         self.with_path("restore-version", |w, version| {
@@ -1220,6 +1227,9 @@ impl Window {
                 match file.set_display_name(&name, None::<&gio::Cancellable>) {
                     Ok(renamed) => {
                         vault::forget();
+                        if let (Some(from), Some(to)) = (file.path(), renamed.path()) {
+                            crate::history::moved(&from, &to);
+                        }
                         for open in editors_at_or_under(&file) {
                             let Some(location) = open.location() else { continue };
                             match file.relative_path(&location) {

@@ -1953,6 +1953,60 @@ impl Editor {
             .collect()
     }
 
+    /// Fills `buffer` with what going back to `version` would change: the lines that come
+    /// back and those that go, each with two lines around it.
+    pub fn preview_version(&self, version: &std::path::Path, buffer: &gtk::TextBuffer) {
+        use crate::history::Line;
+        buffer.set_text("");
+        let table = buffer.tag_table();
+        let tag = |name: &str, color: crate::color::Rgb, strike: bool| {
+            table.lookup(name).unwrap_or_else(|| {
+                let tag = gtk::TextTag::builder()
+                    .name(name)
+                    .paragraph_background_rgba(&render::rgba(color, 0.16))
+                    .strikethrough(strike)
+                    .build();
+                table.add(&tag);
+                tag
+            })
+        };
+        let colors = theme::colors();
+        let (back, gone) = (tag("back", colors.added, false), tag("gone", colors.removed, true));
+        let dim = table.lookup("dim").unwrap_or_else(|| {
+            let tag = gtk::TextTag::builder().name("dim").foreground(colors.dim.to_hex()).build();
+            table.add(&tag);
+            tag
+        });
+        let Ok(old) = std::fs::read_to_string(version) else { return };
+        let now = self.text();
+        let mut end = buffer.end_iter();
+        let Some(lines) = crate::history::changes(&now, &old) else {
+            buffer.insert_with_tags(&mut end, &old, &[]);
+            return;
+        };
+        let changed: Vec<bool> = lines.iter().map(|line| !matches!(line, Line::Same(_))).collect();
+        if !changed.contains(&true) {
+            buffer.insert_with_tags(&mut end, "The same as now.", &[&dim]);
+            return;
+        }
+        let near = |i: usize| changed[i.saturating_sub(2)..(i + 3).min(changed.len())].contains(&true);
+        let mut skipped = false;
+        for (i, line) in lines.iter().enumerate() {
+            if !near(i) {
+                skipped = true;
+                continue;
+            }
+            if std::mem::take(&mut skipped) && end.offset() > 0 {
+                buffer.insert_with_tags(&mut end, "⋯\n", &[&dim]);
+            }
+            match line {
+                Line::Same(text) => buffer.insert(&mut end, &format!("{text}\n")),
+                Line::Back(text) => buffer.insert_with_tags(&mut end, &format!("{text}\n"), &[&back]),
+                Line::Gone(text) => buffer.insert_with_tags(&mut end, &format!("{text}\n"), &[&gone]),
+            }
+        }
+    }
+
     /// The text becomes that of an earlier version (`version`, one of `versions`), as one
     /// change Ctrl+Z takes back; saved when the note is.
     pub fn restore_version(&self, version: &std::path::Path) {
