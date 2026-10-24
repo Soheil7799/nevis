@@ -46,7 +46,7 @@ impl Default for Settings {
             line_numbers: true,
             continue_lists: true,
             open_rendered: true,
-            outside_in_window: true,
+            outside_in_window: false,
             tab_bar_always: false,
             autosave: false,
             spell_check: false,
