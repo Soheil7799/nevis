@@ -59,6 +59,7 @@ const LEFT: &[(&str, &[Row])] = &[
 const RIGHT: &[(&str, &[Row])] = &[
     ("View", &[
         row("Rendered view ⇄ source", "win.reading", ""),
+        row("Source and rendered view side by side", "win.side-by-side", ""),
         row("Folder sidebar", "win.sidebar", ""),
         row("Focus mode: only the paragraph you're writing", "win.focus", ""),
         row("Settings (theme, text size…)", "win.settings", ""),

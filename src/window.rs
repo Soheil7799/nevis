@@ -409,6 +409,10 @@ impl Window {
         self.on_current("print", |_, e| spawn(e.print(None)));
         self.on_current("export-pdf", |_, e| spawn(e.export_pdf()));
         self.on_current("export-html", |_, e| spawn(e.export_html()));
+        self.on_current("side-by-side", |_, e| {
+            let on = !e.is_side_by_side();
+            e.set_side_by_side(on);
+        });
         self.on_current("history", |w, e| {
             let versions = e.versions();
             if versions.is_empty() {
@@ -1713,7 +1717,7 @@ fn build_menu() -> gio::Menu {
         ("Export as HTML…", "win.export-html"),
         ("Print…", "win.print"),
     ]));
-    menu.append_section(None, &section(&[("Find…", "win.find"), ("Reading View", "win.reading")]));
+    menu.append_section(None, &section(&[("Find…", "win.find"), ("Reading View", "win.reading"), ("Side by Side", "win.side-by-side")]));
     menu.append_section(None, &section(&[("Settings…", "win.settings"), ("Keyboard Shortcuts", "win.shortcuts")]));
     menu
 }

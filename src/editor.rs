@@ -101,6 +101,10 @@ pub struct Editor {
     /// Focus mode (the window's): what fades all but the paragraph being written, once made.
     focus_mode: Cell<bool>,
     faded: RefCell<Option<gtk::TextTag>>,
+    /// Side by side: the source and the rendered view in one pane each, the rendered one
+    /// following the typing; and the rendering waiting for the typing to pause.
+    split: RefCell<Option<gtk::Paned>>,
+    rerender_due: RefCell<Option<glib::SourceId>>,
     /// The rendered view's side margin (wider with centred text), and a re-render waiting for
     /// the window to stop changing size.
     reader_margin: Cell<i32>,
@@ -242,6 +246,8 @@ impl Editor {
             copied: RefCell::new(None),
             focus_mode: Cell::new(false),
             faded: RefCell::new(None),
+            split: RefCell::new(None),
+            rerender_due: RefCell::new(None),
             reader_margin: Cell::new(render::MARGIN),
             refit_due: RefCell::new(None),
             fit_queued: Cell::new(false),
@@ -410,6 +416,9 @@ impl Editor {
         self.buffer.connect_changed(move |_| {
             if let Some(editor) = weak.upgrade() {
                 editor.rendered.set(false);
+                if editor.is_split() {
+                    editor.queue_rerender();
+                }
                 if editor.buffer.is_modified() {
                     editor.queue_draft();
                     editor.queue_autosave();
@@ -646,6 +655,76 @@ impl Editor {
         self.stack.visible_child_name().as_deref() == Some("read")
     }
 
+    fn is_split(&self) -> bool {
+        self.split.borrow().is_some()
+    }
+
+    pub fn is_side_by_side(&self) -> bool {
+        self.is_split()
+    }
+
+    /// Whether the rendered view is on screen: alone, or beside the source.
+    fn shows_rendered(&self) -> bool {
+        self.is_reading() || self.is_split()
+    }
+
+    /// The source and the rendered view side by side (on), or the source alone (off).
+    pub fn set_side_by_side(&self, on: bool) {
+        if on == self.is_split() {
+            return;
+        }
+        if !on {
+            let Some(split) = self.split.take() else { return };
+            let (edit, read) = (split.start_child(), split.end_child());
+            split.set_start_child(None::<&gtk::Widget>);
+            split.set_end_child(None::<&gtk::Widget>);
+            self.stack.remove(&split);
+            if let (Some(edit), Some(read)) = (edit, read) {
+                self.stack.add_named(&edit, Some("edit"));
+                self.stack.add_named(&read, Some("read"));
+            }
+            self.stack.set_visible_child_name("edit");
+            self.view.grab_focus();
+            return;
+        }
+        let (Some(edit), Some(read)) = (self.stack.child_by_name("edit"), self.stack.child_by_name("read")) else { return };
+        self.stack.remove(&edit);
+        self.stack.remove(&read);
+        let split = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .start_child(&edit)
+            .end_child(&read)
+            .shrink_start_child(false)
+            .shrink_end_child(false)
+            .build();
+        split.add_css_class("nevis-split");
+        if self.stack.width() > 0 {
+            split.set_position(self.stack.width() / 2);
+        }
+        self.stack.add_named(&split, Some("split"));
+        self.stack.set_visible_child_name("split");
+        *self.split.borrow_mut() = Some(split);
+        self.rerender();
+        self.view.grab_focus();
+    }
+
+    /// Renders again once the typing pauses, side by side.
+    fn queue_rerender(&self) {
+        if let Some(due) = self.rerender_due.take() {
+            due.remove();
+        }
+        let me = self.me.clone();
+        let due = glib::timeout_add_local_once(Duration::from_millis(300), move || {
+            if let Some(editor) = me.upgrade() {
+                editor.rerender_due.take();
+                if editor.is_split() && !editor.rendered.get() {
+                    editor.rerender();
+                }
+            }
+        });
+        *self.rerender_due.borrow_mut() = Some(due);
+    }
+
     pub fn find_bar(&self) -> Rc<FindBar> {
         self.find
             .borrow_mut()
@@ -717,7 +796,7 @@ impl Editor {
                 let waiting = glib::timeout_add_local_once(Duration::from_millis(120), move || {
                     if let Some(editor) = me.upgrade() {
                         editor.refit_due.take();
-                        if editor.is_reading() && !editor.rendered.get() {
+                        if editor.shows_rendered() && !editor.rendered.get() {
                             editor.rerender();
                         }
                     }
@@ -859,7 +938,6 @@ impl Editor {
         self.load(file, then);
     }
 
-    /// Focuses whichever view is showing: the rendered one or the source.
     pub fn focus_mode(&self) -> bool {
         self.focus_mode.get()
     }
@@ -903,6 +981,7 @@ impl Editor {
         self.view.scroll_to_mark(&insert, 0.0, true, 0.0, 0.5);
     }
 
+    /// Focuses whichever view is showing: the rendered one or the source.
     pub fn focus_view(&self) {
         if self.is_reading() {
             self.reader.grab_focus();
@@ -913,6 +992,9 @@ impl Editor {
 
     /// Shows the rendered Markdown (true) or the source (false).
     pub fn set_reading(&self, on: bool) {
+        if self.is_split() {
+            self.set_side_by_side(false);
+        }
         if on && !self.rendered.get() {
             self.render_markdown();
         }
@@ -1139,7 +1221,7 @@ impl Editor {
             self.styler.recolor();
         }
         self.rendered.set(false);
-        if self.is_reading() {
+        if self.shows_rendered() {
             self.rerender();
         }
     }

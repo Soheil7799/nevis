@@ -165,6 +165,7 @@ fn install_actions(app: &gtk::Application) {
         ("win.zoom-reset", &["<Ctrl>0", "<Ctrl>KP_0"]),
         ("win.wrap", &["<Alt>z"]),
         ("win.reading", &["<Ctrl>e"]),
+        ("win.side-by-side", &["<Ctrl><Alt>e"]),
         ("win.line-numbers", &["<Ctrl><Shift>l"]),
         ("win.shortcuts", &["<Ctrl>question", "F1"]),
         ("win.sidebar", &["<Ctrl>b"]),
