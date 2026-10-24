@@ -98,6 +98,9 @@ pub struct Editor {
     copy_due: RefCell<Option<glib::SourceId>>,
     /// "Copied", shown, and when it goes.
     copied: RefCell<Option<(gtk::Label, glib::SourceId)>>,
+    /// Focus mode (the window's): what fades all but the paragraph being written, once made.
+    focus_mode: Cell<bool>,
+    faded: RefCell<Option<gtk::TextTag>>,
     /// The rendered view's side margin (wider with centred text), and a re-render waiting for
     /// the window to stop changing size.
     reader_margin: Cell<i32>,
@@ -237,6 +240,8 @@ impl Editor {
             preview: RefCell::new(None),
             copy_due: RefCell::new(None),
             copied: RefCell::new(None),
+            focus_mode: Cell::new(false),
+            faded: RefCell::new(None),
             reader_margin: Cell::new(render::MARGIN),
             refit_due: RefCell::new(None),
             fit_queued: Cell::new(false),
@@ -511,6 +516,9 @@ impl Editor {
                 Some("insert") => {
                     editor.styler.cursor_moved();
                     editor.queue_completion();
+                    if editor.focus_mode.get() {
+                        editor.refocus();
+                    }
                 }
                 Some("selection_bound") => editor.styler.cursor_moved(),
                 _ => {}
@@ -801,6 +809,49 @@ impl Editor {
     }
 
     /// Focuses whichever view is showing: the rendered one or the source.
+    pub fn focus_mode(&self) -> bool {
+        self.focus_mode.get()
+    }
+
+    /// Focus mode on or off: all but the paragraph being written faded, and it kept in the
+    /// middle of the view (room above the first line and under the last lets it get there).
+    pub fn set_focus_mode(&self, on: bool) {
+        self.focus_mode.set(on);
+        self.set_line_numbers(!on && settings::get().line_numbers);
+        if !on {
+            self.view.set_top_margin(8);
+            self.view.set_bottom_margin(12);
+        }
+        self.refocus();
+    }
+
+    fn refocus(&self) {
+        let (start, end) = (self.buffer.start_iter(), self.buffer.end_iter());
+        if let Some(tag) = self.faded.borrow().as_ref() {
+            self.buffer.remove_tag(tag, &start, &end);
+        }
+        if !self.focus_mode.get() {
+            return;
+        }
+        let tag = self.faded.borrow_mut().get_or_insert_with(|| {
+            let text = theme::colors().text;
+            let tag = gtk::TextTag::builder().foreground_rgba(&render::rgba(text, 0.32)).build();
+            self.buffer.tag_table().add(&tag);
+            tag
+        }).clone();
+        // Over every other tag's colour, those made since included.
+        tag.set_priority(self.buffer.tag_table().size() - 1);
+        self.styler.keep_hidden_on_top();
+        let insert = self.buffer.get_insert();
+        let (from, to) = paragraph_around(&self.buffer.iter_at_mark(&insert));
+        self.buffer.apply_tag(&tag, &start, &from);
+        self.buffer.apply_tag(&tag, &to, &end);
+        let half = (self.view.height() / 2).max(12);
+        self.view.set_top_margin(half);
+        self.view.set_bottom_margin(half);
+        self.view.scroll_to_mark(&insert, 0.0, true, 0.0, 0.5);
+    }
+
     pub fn focus_view(&self) {
         if self.is_reading() {
             self.reader.grab_focus();
@@ -2226,6 +2277,41 @@ impl Editor {
             self.tab_close.remove_css_class("unsaved");
         }
     }
+}
+
+/// The paragraph `at` is in: from its first line's start to its last line's end, the lines
+/// between blank ones (a blank line is a paragraph of its own).
+fn paragraph_around(at: &gtk::TextIter) -> (gtk::TextIter, gtk::TextIter) {
+    let blank = |line: &gtk::TextIter| {
+        let mut end = *line;
+        if !end.ends_line() {
+            end.forward_to_line_end();
+        }
+        line.text(&end).trim().is_empty()
+    };
+    let mut from = *at;
+    from.set_line_offset(0);
+    let mut to = from;
+    if !blank(&from) {
+        loop {
+            let mut previous = from;
+            if !previous.backward_line() || blank(&previous) {
+                break;
+            }
+            from = previous;
+        }
+        loop {
+            let mut next = to;
+            if !next.forward_line() || blank(&next) {
+                break;
+            }
+            to = next;
+        }
+    }
+    if !to.ends_line() {
+        to.forward_to_line_end();
+    }
+    (from, to)
 }
 
 /// Where the user was, kept across a reload.

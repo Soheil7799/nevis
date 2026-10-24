@@ -164,6 +164,7 @@ fn install_actions(app: &gtk::Application) {
         ("win.line-numbers", &["<Ctrl><Shift>l"]),
         ("win.shortcuts", &["<Ctrl>question", "F1"]),
         ("win.sidebar", &["<Ctrl>b"]),
+        ("win.focus", &["F11"]),
         ("win.open-folder", &["<Ctrl><Shift>o"]),
         ("win.quick-open", &["<Ctrl>p"]),
         ("win.palette", &["<Ctrl><Shift>p"]),

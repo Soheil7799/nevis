@@ -76,6 +76,10 @@ pub struct Window {
     closed: RefCell<Vec<gio::File>>,
     /// Closing as nevis quits: every tab is kept for next time, without questions.
     keeping: Cell<bool>,
+    /// Focus mode: no tab bar, no sidebar (whether it showed before), the text faded but for
+    /// the paragraph being written.
+    focused: Cell<bool>,
+    sidebar_before: Cell<bool>,
     /// Closing after the user answered for its unsaved changes.
     confirmed: Cell<bool>,
     /// Restoring tabs from the last session: they load when shown, not when added.
@@ -141,6 +145,8 @@ impl Window {
             help: RefCell::new(None),
             closed: RefCell::new(Vec::new()),
             keeping: Cell::new(false),
+            focused: Cell::new(false),
+            sidebar_before: Cell::new(false),
             confirmed: Cell::new(false),
             restoring: Cell::new(false),
         });
@@ -215,6 +221,9 @@ impl Window {
             editor.ensure_loaded();
         }
         self.reading_changed(editor, editor.is_reading());
+        if editor.focus_mode() != self.focused.get() {
+            editor.set_focus_mode(self.focused.get());
+        }
         if let Some(location) = editor.location() {
             self.select_in_sidebar(&location);
         }
@@ -240,7 +249,7 @@ impl Window {
     fn tabs_changed(&self) {
         let editors = self.editors.borrow();
         // A single tab needs no tab bar, unless the settings say otherwise.
-        self.bar_scroller.set_visible(editors.len() > 1 || settings::get().tab_bar_always);
+        self.bar_scroller.set_visible(!self.focused.get() && (editors.len() > 1 || settings::get().tab_bar_always));
         // Alt+1…8 pick the first eight tabs and Alt+9 the last, so those are the numbers shown.
         for (index, editor) in editors.iter().enumerate() {
             let number = if index < 8 {
@@ -467,6 +476,7 @@ impl Window {
         self.action("settings", |w| w.toggle_settings());
         self.action("shortcuts", |w| w.toggle_help());
         self.action("sidebar", |w| w.toggle_sidebar());
+        self.toggle("focus", false, |w, on| w.set_focus_mode(on));
         self.action("theme", |w| w.pick_theme());
         self.action("outline", |w| w.toggle_outline());
         self.action("palette", |w| w.toggle_palette());
@@ -704,6 +714,29 @@ impl Window {
     fn focus_view(&self) {
         if let Some(editor) = self.current() {
             editor.focus_view();
+        }
+    }
+
+    fn set_focus_mode(&self, on: bool) {
+        self.focused.set(on);
+        if let Some(sidebar) = self.sidebar.borrow().as_ref() {
+            if on {
+                self.sidebar_before.set(sidebar.widget.is_visible());
+                sidebar.widget.set_visible(false);
+            } else {
+                sidebar.widget.set_visible(self.sidebar_before.get());
+            }
+        }
+        self.tabs_changed();
+        // On: the tab in front (the others when they come forward, see `select`). Off: all.
+        if on {
+            if let Some(editor) = self.current() {
+                editor.set_focus_mode(true);
+            }
+        } else {
+            for editor in self.tabs().iter().filter(|editor| editor.focus_mode()) {
+                editor.set_focus_mode(false);
+            }
         }
     }
 
@@ -1484,7 +1517,7 @@ pub fn init() {
         for editor in all_editors() {
             editor.set_wrap(new.wrap);
             // Also fits the margins to the text width and size.
-            editor.set_line_numbers(new.line_numbers);
+            editor.set_line_numbers(new.line_numbers && !editor.focus_mode());
             if new.spell_check != old.spell_check {
                 editor.set_spell_check(new.spell_check);
             }

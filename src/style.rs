@@ -190,6 +190,12 @@ impl Styler {
         self.rehide();
     }
 
+    /// Puts what hides drawn-over text above every other tag (focus mode fades the text with
+    /// one made later).
+    pub fn keep_hidden_on_top(&self) {
+        self.clear.set_priority(self.buffer.tag_table().size() - 1);
+    }
+
     /// The line numbers were shown or hidden: fences shrink only without them.
     pub fn numbers_changed(&self) {
         self.rehide();
