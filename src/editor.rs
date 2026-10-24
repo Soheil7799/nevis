@@ -125,7 +125,7 @@ pub enum OnLoad {
     /// The source view, with the text found on this line selected: a folder search hit.
     Hit { line: usize, in_line: Range<usize> },
     /// As the tab was left last time, unsaved text included.
-    Restore { text: Option<String>, line: u32, column: u32, reading: bool },
+    Restore { text: Option<String>, line: u32, column: u32, reading: bool, side_by_side: bool },
 }
 
 /// What a click in the source view follows.
@@ -257,6 +257,14 @@ impl Editor {
         zoom_on_ctrl_scroll(&edit_scroller);
         zoom_on_ctrl_scroll(&read_scroller);
         // Side by side, the rendered view follows the source as it scrolls.
+        let weak = Rc::downgrade(&editor);
+        edit_scroller.vadjustment().connect_page_size_notify(move |_| {
+            if let Some(editor) = weak.upgrade()
+                && editor.focus_mode.get()
+            {
+                editor.refocus();
+            }
+        });
         let weak = Rc::downgrade(&editor);
         edit_scroller.vadjustment().connect_value_changed(move |_| {
             if let Some(editor) = weak.upgrade()
@@ -694,6 +702,7 @@ impl Editor {
             }
             self.stack.set_visible_child_name("edit");
             self.view.grab_focus();
+            crate::window::store_soon();
             return;
         }
         let (Some(edit), Some(read)) = (self.stack.child_by_name("edit"), self.stack.child_by_name("read")) else { return };
@@ -713,6 +722,7 @@ impl Editor {
         self.stack.add_named(&split, Some("split"));
         self.stack.set_visible_child_name("split");
         *self.split.borrow_mut() = Some(split);
+        crate::window::store_soon();
         self.rerender();
         self.view.grab_focus();
     }
@@ -945,7 +955,7 @@ impl Editor {
                 }
                 self.set_reading(false);
             }
-            OnLoad::Restore { text, line, column, reading } => {
+            OnLoad::Restore { text, line, column, reading, side_by_side } => {
                 if let Some(text) = text {
                     self.buffer.set_text(&text);
                     self.buffer.set_modified(true);
@@ -956,6 +966,9 @@ impl Editor {
                     self.set_reading(true);
                 } else {
                     self.set_reading(false);
+                    if side_by_side && markdown {
+                        self.set_side_by_side(true);
+                    }
                 }
             }
         }
@@ -1644,7 +1657,7 @@ impl Editor {
         if text.is_some() {
             *self.draft.borrow_mut() = state.draft.clone();
         }
-        let then = OnLoad::Restore { text, line: state.line, column: state.column, reading: state.reading };
+        let then = OnLoad::Restore { text, line: state.line, column: state.column, reading: state.reading, side_by_side: state.side_by_side };
         match state.path {
             Some(path) => self.load(gio::File::for_path(path), Some(then)),
             None => {
@@ -2457,6 +2470,7 @@ impl Editor {
             line: cursor.line() as u32,
             column: cursor.line_offset() as u32,
             reading: self.is_reading(),
+            side_by_side: self.is_split(),
         }
     }
 

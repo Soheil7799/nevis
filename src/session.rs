@@ -27,6 +27,8 @@ pub struct TabState {
     pub column: u32,
     /// Showing the rendered view rather than the source.
     pub reading: bool,
+    /// Showing the source and the rendered view side by side.
+    pub side_by_side: bool,
 }
 
 impl Session {
@@ -57,7 +59,7 @@ impl Session {
                     if path.is_none() && draft.is_none() {
                         continue;
                     }
-                    let tab = TabState { path, draft, line, column, reading: view == "r" };
+                    let tab = TabState { path, draft, line, column, reading: view == "r", side_by_side: view == "s" };
                     if windows.is_empty() {
                         windows.push(WindowState { folder: None, active: 0, tabs: Vec::new() });
                     }
@@ -76,7 +78,7 @@ impl Session {
     }
 
     /// One line per window ("window", its active tab, its folder) followed by one per tab
-    /// ("tab", r or e for the view, line, column, draft or -, path); tab-separated, with
+    /// ("tab", r, e or s for the view (rendered, source, side by side), line, column, draft or -, path); tab-separated, with
     /// paths last so that they may hold tabs themselves.
     pub fn to_text(&self) -> String {
         let mut text = String::from("nevis session 1\n");
@@ -84,7 +86,7 @@ impl Session {
             let folder = window.folder.as_ref().map(|f| f.to_string_lossy()).unwrap_or_default();
             text.push_str(&format!("window\t{}\t{folder}\n", window.active));
             for tab in &window.tabs {
-                let view = if tab.reading { "r" } else { "e" };
+                let view = if tab.side_by_side { "s" } else if tab.reading { "r" } else { "e" };
                 let draft = tab.draft.as_deref().unwrap_or("-");
                 let path = tab.path.as_ref().map(|p| p.to_string_lossy()).unwrap_or_default();
                 text.push_str(&format!("tab\t{view}\t{}\t{}\t{draft}\t{path}\n", tab.line, tab.column));
@@ -198,7 +200,7 @@ mod tests {
     use super::*;
 
     fn tab(path: Option<&str>, draft: Option<&str>, line: u32, column: u32, reading: bool) -> TabState {
-        TabState { path: path.map(PathBuf::from), draft: draft.map(str::to_owned), line, column, reading }
+        TabState { path: path.map(PathBuf::from), draft: draft.map(str::to_owned), line, column, reading, side_by_side: false }
     }
 
     #[test]
@@ -213,6 +215,13 @@ mod tests {
                 WindowState { folder: None, active: 0, tabs: vec![tab(Some("/tmp/a b\tc.txt"), Some("77"), 1, 2, false)] },
             ],
         };
+        assert_eq!(Session::parse(&session.to_text()), session);
+    }
+
+    #[test]
+    fn a_tab_side_by_side_comes_back_so() {
+        let split = TabState { side_by_side: true, ..tab(Some("/n/a.md"), None, 3, 1, false) };
+        let session = Session { windows: vec![WindowState { folder: None, active: 0, tabs: vec![split] }] };
         assert_eq!(Session::parse(&session.to_text()), session);
     }
 
