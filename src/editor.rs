@@ -263,6 +263,19 @@ impl Editor {
     }
 
     fn connect_signals(self: &Rc<Self>, close: &gtk::Label) {
+        // The tab's tooltip: where the file is, and how long it is (counted when asked for).
+        self.tab.set_has_tooltip(true);
+        let weak = Rc::downgrade(self);
+        self.tab.connect_query_tooltip(move |_, _, _, _, tooltip| {
+            let Some(editor) = weak.upgrade() else { return false };
+            let length = crate::words::summary(&editor.text());
+            let text = match editor.location() {
+                Some(location) => format!("{}\n{length}", tilde(&location.parse_name())),
+                None => length,
+            };
+            tooltip.set_text(Some(&text));
+            true
+        });
         // A change of width (resizing, the sidebar): the margins follow, once it is laid out.
         for view in [self.view.upcast_ref::<gtk::TextView>(), self.reader.upcast_ref::<gtk::TextView>()] {
             let Some(adjustment) = view.hadjustment() else { continue };
@@ -2212,8 +2225,6 @@ impl Editor {
         } else {
             self.tab_close.remove_css_class("unsaved");
         }
-        let path = self.location().map(|l| tilde(&l.parse_name()));
-        self.tab.set_tooltip_text(path.as_deref());
     }
 }
 

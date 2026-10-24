@@ -43,6 +43,7 @@ mod switcher;
 mod theme;
 mod vault;
 mod window;
+mod words;
 
 use gtk::{gio, glib, prelude::*};
 
