@@ -408,6 +408,7 @@ impl Window {
         self.on_current("save-as", |_, e| spawn(e.save_as()));
         self.on_current("print", |_, e| spawn(e.print(None)));
         self.on_current("export-pdf", |_, e| spawn(e.export_pdf()));
+        self.on_current("export-html", |_, e| spawn(e.export_html()));
         self.on_current("find", |_, e| {
             e.set_reading(false);
             e.find_bar().show(false);
@@ -1622,6 +1623,7 @@ fn build_menu() -> gio::Menu {
         ("Save", "win.save"),
         ("Save As…", "win.save-as"),
         ("Export as PDF…", "win.export-pdf"),
+        ("Export as HTML…", "win.export-html"),
         ("Print…", "win.print"),
     ]));
     menu.append_section(None, &section(&[("Find…", "win.find"), ("Reading View", "win.reading")]));

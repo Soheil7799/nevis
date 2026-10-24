@@ -1710,6 +1710,25 @@ impl Editor {
         self.print(Some(file)).await;
     }
 
+    /// Saves the note as one HTML page (see `html::page`), where the user picks.
+    pub async fn export_html(self: Rc<Self>) {
+        let name = self.print_name();
+        let stem = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
+        let dialog = gtk::FileDialog::builder().title("Export as HTML").modal(true).initial_name(format!("{stem}.html")).build();
+        let folder = self.location().and_then(|l| l.parent());
+        if let Some(folder) = &folder {
+            dialog.set_initial_folder(Some(folder));
+        }
+        let Ok(file) = dialog.save_future(Some(&self.window)).await else { return };
+        let Some(path) = file.path() else { return };
+        let find = |link: &str| self.find(link);
+        let folder = folder.and_then(|f| f.path());
+        let page = crate::html::page(&stem, &self.text(), folder.as_deref(), &find, &theme::paper_colors(), &theme::colors());
+        if let Err(error) = std::fs::write(&path, page) {
+            alert(&self.window, "Couldn't export", &error.to_string());
+        }
+    }
+
     /// The file's name, or what an unsaved note would be named.
     fn print_name(&self) -> String {
         self.location()
