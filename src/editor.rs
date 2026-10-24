@@ -256,6 +256,15 @@ impl Editor {
         editor.connect_signals(&close);
         zoom_on_ctrl_scroll(&edit_scroller);
         zoom_on_ctrl_scroll(&read_scroller);
+        // Side by side, the rendered view follows the source as it scrolls.
+        let weak = Rc::downgrade(&editor);
+        edit_scroller.vadjustment().connect_value_changed(move |_| {
+            if let Some(editor) = weak.upgrade()
+                && editor.is_split()
+            {
+                editor.follow_source();
+            }
+        });
         // A new note is Markdown until saved as something else.
         editor.styler.set_enabled(true);
         editor.update_tab();
@@ -706,6 +715,41 @@ impl Editor {
         *self.split.borrow_mut() = Some(split);
         self.rerender();
         self.view.grab_focus();
+    }
+
+    /// Side by side: scrolls the rendered view to show what the source's top line is in, as
+    /// far into it as the source is (each block of the note, by where it starts in both).
+    fn follow_source(&self) {
+        let lines = self.lines.borrow();
+        let (Some(edit), Some(read)) = (self.view.vadjustment(), self.reader.vadjustment()) else { return };
+        if lines.is_empty() {
+            return;
+        }
+        let top = edit.value() as i32;
+        // Where line `n` of the source starts, and where the rendered block of `i` does.
+        let source_y = |n: usize| self.buffer.iter_at_line(n as i32).map_or(0, |iter| self.view.line_yrange(&iter).0);
+        let rendered_y = |i: usize| {
+            let iter = self.reader.buffer().iter_at_mark(&lines[i].1);
+            self.reader.iter_location(&iter).y()
+        };
+        let (line, _) = self.view.line_at_y(top);
+        let line = line.line() as usize;
+        let at = lines.partition_point(|(start, _)| *start <= line).saturating_sub(1);
+        let (s0, r0) = (source_y(lines[at].0), rendered_y(at));
+        let (s1, r1) = match lines.get(at + 1) {
+            Some((next, _)) => (source_y(*next), rendered_y(at + 1)),
+            None => (edit.upper() as i32, read.upper() as i32),
+        };
+        let part = if s1 > s0 { (top - s0).clamp(0, s1 - s0) as f64 / (s1 - s0) as f64 } else { 0.0 };
+        // At the very top or bottom of the source, the rendered view is too.
+        let value = if top <= 0 {
+            0.0
+        } else if edit.value() + edit.page_size() >= edit.upper() - 1.0 {
+            read.upper() - read.page_size()
+        } else {
+            r0 as f64 + part * (r1 - r0) as f64
+        };
+        read.set_value(value.clamp(0.0, (read.upper() - read.page_size()).max(0.0)));
     }
 
     /// Renders again once the typing pauses, side by side.
@@ -1209,7 +1253,14 @@ impl Editor {
     fn rerender(&self) {
         let scroll = self.reader.vadjustment().map(|a| a.value());
         self.render_markdown();
-        if let (Some(value), Some(adjustment)) = (scroll, self.reader.vadjustment()) {
+        if self.is_split() {
+            let me = self.me.clone();
+            after_next_frame(&self.window, move || {
+                if let Some(editor) = me.upgrade() {
+                    editor.follow_source();
+                }
+            });
+        } else if let (Some(value), Some(adjustment)) = (scroll, self.reader.vadjustment()) {
             after_next_frame(&self.window, move || adjustment.set_value(value));
         }
     }

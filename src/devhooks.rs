@@ -7,7 +7,8 @@
 //!   picture); `:` gives an action its string argument.
 //! - `NEVIS_TYPE=text`: then type it at the cursor, as a user would (replacing the selection;
 //!   in a field, a final newline presses Enter). In a text view, `{Tab}`, `{S-Tab}`, `{Enter}`
-//!   and `{End}` press those keys, through the view's own key handlers.
+//!   and `{End}` press those keys, through the view's own key handlers; `{Line:N}` puts the
+//!   cursor on line N (from 1) and scrolls it to the top.
 //! - `NEVIS_PASTE_IMAGE=file.png`: then paste that image at the cursor (instead of what the
 //!   clipboard holds, which test runs share with the desktop).
 //! - `NEVIS_WAIT=ms`: how long to wait before typing and the picture (default 500).
@@ -251,6 +252,20 @@ fn press(view: &gtk::TextView, key: &str) {
         "End" => {
             let buffer = view.buffer();
             buffer.place_cursor(&buffer.end_iter());
+            view.scroll_to_mark(&buffer.get_insert(), 0.0, false, 0.0, 0.0);
+            return;
+        }
+        _ if key.starts_with("Line:") => {
+            let buffer = view.buffer();
+            let line = key[5..].parse::<i32>().unwrap_or(1) - 1;
+            if let Some(iter) = buffer.iter_at_line(line) {
+                buffer.place_cursor(&iter);
+                let mark = buffer.create_mark(None, &iter, true);
+                let view = view.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
+                    view.scroll_to_mark(&mark, 0.0, true, 0.0, 0.0);
+                });
+            }
             return;
         }
         _ => return eprintln!("nevis: NEVIS_TYPE: no key {key}"),
