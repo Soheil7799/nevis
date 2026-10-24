@@ -2176,6 +2176,8 @@ impl Editor {
         if !self.view.is_editable() || self.saving.replace(true) {
             return false;
         }
+        // What the file held, for its history (when no version has it yet).
+        let before = self.location().and_then(|location| location.path()).and_then(|path| std::fs::read_to_string(path).ok());
         let saver = sourceview::FileSaver::new(&self.buffer, &self.file);
         // A saver may be reconfigured and rerun after an error.
         let saved = loop {
@@ -2205,7 +2207,7 @@ impl Editor {
         self.saving.set(false);
         if saved {
             if let Some(path) = self.location().and_then(|location| location.path()) {
-                crate::history::keep(&path, &self.text());
+                crate::history::keep(&path, before.as_deref(), &self.text());
             }
             self.kept_mine.set(false);
             self.buffer.set_modified(false);

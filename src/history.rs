@@ -1,14 +1,14 @@
 //! Earlier versions of each note, kept on this machine only (in nevis's state folder): each
-//! save keeps one, at most one every ten minutes while the note is written (a later save in
-//! those ten minutes takes its place), the last 100.
+//! save keeps one (and the text it replaces, when no version has it: a note never saved by
+//! nevis, or changed outside it). They thin out as they age: the first of every minute for an
+//! hour (autosaving makes many), of every ten minutes for a day, then of every hour; at most 200.
 
 use std::path::{Path, PathBuf};
 
 use gtk::glib;
 
-/// Saves this soon after a version's first share it: the later one takes its place.
-const APART_MS: i64 = 10 * 60 * 1000;
-const KEPT: usize = 100;
+const MINUTE: i64 = 60 * 1000;
+const KEPT: usize = 200;
 
 /// The folder a note's versions are in: named by a checksum of its path, so that any path
 /// fits; `path` in it says whose they are.
@@ -17,35 +17,60 @@ fn folder(note: &Path) -> PathBuf {
     crate::positions::state_dir().join("history").join(&sum[..sum.len().min(24)])
 }
 
-/// Keeps `text` as the version of `note` saved now.
-pub fn keep(note: &Path, text: &str) {
+/// Keeps `text` as the version of `note` saved now; `before`, what the file held until then,
+/// is kept first if the newest version isn't it.
+pub fn keep(note: &Path, before: Option<&str>, text: &str) {
     let folder = folder(note);
     let versions = versions(note);
-    if let Some((newest, _)) = versions.first()
-        && std::fs::read_to_string(newest).is_ok_and(|kept| kept == text)
-    {
+    let newest = versions.first().and_then(|(newest, _)| std::fs::read_to_string(newest).ok());
+    if newest.as_deref() == Some(text) || std::fs::create_dir_all(&folder).is_err() {
         return;
     }
     let now = glib::real_time() / 1000;
-    let times: Vec<i64> = versions.iter().map(|(_, time)| *time).collect();
-    let (name, dropped) = plan(&times, now);
-    if std::fs::create_dir_all(&folder).is_err() || std::fs::write(folder.join(format!("{name}.md")), text).is_err() {
+    let mut times: Vec<i64> = versions.iter().map(|(_, time)| *time).collect();
+    let write = |time: i64, text: &str| std::fs::write(folder.join(format!("{time}.md")), text).is_ok();
+    if let Some(before) = before.filter(|before| *before != text && newest.as_deref() != Some(before))
+        && write(now - 1, before)
+    {
+        times.insert(0, now - 1);
+    }
+    if !write(now, text) {
         return;
     }
+    times.insert(0, now);
     let _ = std::fs::write(folder.join("path"), note.to_string_lossy().as_bytes());
-    for time in dropped {
+    for time in thinned(&times, now) {
         let _ = std::fs::remove_file(folder.join(format!("{time}.md")));
     }
 }
 
-/// Where a version saved at `now` (ms) goes, among those started at `times` (newest first):
-/// in the newest, if that one started less than ten minutes ago, else a new one started now;
-/// and the oldest it pushes out of the last 100.
-fn plan(times: &[i64], now: i64) -> (i64, Vec<i64>) {
-    match times.first() {
-        Some(&newest) if now - newest < APART_MS => (newest, Vec::new()),
-        _ => (now, times.iter().rev().take((times.len() + 1).saturating_sub(KEPT)).copied().collect()),
+/// Which of the versions saved at `times` (ms, newest first) go at `now`: all but the first
+/// of their minute in the last hour, of their ten minutes in the day, of their hour before;
+/// and the oldest beyond 200.
+fn thinned(times: &[i64], now: i64) -> Vec<i64> {
+    let mut dropped = Vec::new();
+    let mut kept = 0usize;
+    // Oldest first, so that each stretch keeps its first.
+    let mut last_stretch = None;
+    for &time in times.iter().rev() {
+        let age = now - time;
+        let stretch = match age {
+            _ if age < 60 * MINUTE => Some((1, time.div_euclid(MINUTE))),
+            _ if age < 24 * 60 * MINUTE => Some((10, time.div_euclid(10 * MINUTE))),
+            _ => Some((60, time.div_euclid(60 * MINUTE))),
+        };
+        if stretch.is_some() && stretch == last_stretch {
+            dropped.push(time);
+        } else {
+            kept += 1;
+        }
+        last_stretch = stretch;
     }
+    // The oldest of those kept, past the last 100.
+    let excess = kept.saturating_sub(KEPT);
+    let mut oldest: Vec<i64> = times.iter().rev().copied().filter(|time| !dropped.contains(time)).take(excess).collect();
+    dropped.append(&mut oldest);
+    dropped
 }
 
 /// `note`'s versions, newest first: each file, and when it started (ms since 1970; its file's
@@ -68,13 +93,17 @@ pub fn versions(note: &Path) -> Vec<(PathBuf, i64)> {
 pub fn when(time_ms: i64) -> String {
     let Ok(then) = glib::DateTime::from_unix_local(time_ms / 1000) else { return String::new() };
     let Ok(now) = glib::DateTime::now_local() else { return String::new() };
-    let days = |date: &glib::DateTime| date.year() * 400 + date.day_of_year();
+    let day = |date: &glib::DateTime| date.ymd();
+    let yesterday = now.add_days(-1).ok();
     let format = |pattern: &str| then.format(pattern).map(|s| s.to_string()).unwrap_or_default();
-    match days(&now) - days(&then) {
-        0 => format("Today %H:%M"),
-        1 => format("Yesterday %H:%M"),
-        _ if then.year() == now.year() => format("%a %e %b %H:%M"),
-        _ => format("%e %b %Y %H:%M"),
+    if day(&then) == day(&now) {
+        format("Today %H:%M")
+    } else if yesterday.is_some_and(|yesterday| day(&yesterday) == day(&then)) {
+        format("Yesterday %H:%M")
+    } else if then.year() == now.year() {
+        format("%a %e %b %H:%M")
+    } else {
+        format("%e %b %Y %H:%M")
     }
 }
 
@@ -157,15 +186,25 @@ mod tests {
     const MIN: i64 = 60 * 1000;
 
     #[test]
-    fn a_save_within_ten_minutes_of_the_newest_versions_start_takes_its_place() {
-        assert_eq!(plan(&[100 * MIN, 50 * MIN], 105 * MIN), (100 * MIN, vec![]));
-        assert_eq!(plan(&[100 * MIN], 111 * MIN), (111 * MIN, vec![]));
-        assert_eq!(plan(&[], 7), (7, vec![]));
+    fn in_the_last_hour_the_first_save_of_each_minute_stays() {
+        let now = 1000 * MIN;
+        assert_eq!(thinned(&[now, now - 4 * MIN, now - 5 * MIN, now - 59 * MIN], now), Vec::<i64>::new());
+        assert_eq!(thinned(&[now - 5 * MIN + 2000, now - 5 * MIN + 1000], now), vec![now - 5 * MIN + 2000]);
     }
 
     #[test]
-    fn only_the_last_hundred_stay() {
-        let times: Vec<i64> = (0..100).rev().map(|n| n * 20 * MIN).collect();
-        assert_eq!(plan(&times, 100 * 20 * MIN), (100 * 20 * MIN, vec![0]));
+    fn older_ones_keep_the_first_of_their_ten_minutes_then_of_their_hour() {
+        let now = 10_000 * MIN;
+        // Two in one ten minutes two hours ago: the later goes.
+        assert_eq!(thinned(&[now - 121 * MIN, now - 125 * MIN], now), vec![now - 121 * MIN]);
+        // Two in one hour two days ago: the later goes.
+        let old = (now - 48 * 60 * MIN).div_euclid(60 * MIN) * 60 * MIN;
+        assert_eq!(thinned(&[old + 40 * MIN, old + 5 * MIN], now), vec![old + 40 * MIN]);
+    }
+
+    #[test]
+    fn only_the_last_two_hundred_stay() {
+        let times: Vec<i64> = (0..201).rev().map(|n| n * 60 * MIN).collect();
+        assert_eq!(thinned(&times, 200 * 60 * MIN), vec![0]);
     }
 }
