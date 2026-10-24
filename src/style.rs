@@ -325,7 +325,7 @@ impl Styler {
         let code = code.into_iter().map(|range| render::Panel {
             start: self.buffer.create_mark(None, &self.iter_at(range.start), true),
             end: self.buffer.create_mark(None, &self.iter_at(range.end), false),
-            inset: -12,
+            inset: -8,
             look: render::Look::Box(render::rgba(colors.code_background, 1.0)),
             rtl: false,
             fold: None,
@@ -339,7 +339,7 @@ impl Styler {
                 render::Panel {
                     start: self.buffer.create_mark(None, &start, true),
                     end: self.buffer.create_mark(None, &end, false),
-                    inset: -12,
+                    inset: -8,
                     look: match kind {
                         Some(kind) => render::Look::Box(render::rgba(render::callout_color(kind), 0.10)),
                         None => render::Look::Bar(render::rgba(accent, 0.7)),
@@ -563,7 +563,8 @@ fn tag_for(kind: Kind) -> gtk::TextTag {
         Kind::Code => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().code.to_hex()).build(),
         Kind::LinkText => gtk::TextTag::builder().foreground(theme::colors().link.to_hex()).underline(pango::Underline::Single).build(),
         Kind::ListMarker => gtk::TextTag::builder().foreground(theme::colors().bullet.to_hex()).weight(700).build(),
-        Kind::Task => gtk::TextTag::builder().foreground(theme::colors().accent.to_hex()).weight(700).build(),
+        // In the code font: "[x]" as wide as "[ ]", so the box drawn over each sits alike.
+        Kind::Task => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().accent.to_hex()).weight(700).build(),
         Kind::Marker => gtk::TextTag::builder().foreground(theme::colors().marker.to_hex()).build(),
     }
 }
@@ -753,7 +754,7 @@ pub fn hidden(source: &str, spans: &Spans, editing: std::ops::RangeInclusive<usi
 /// The backgrounds behind inline code and #tags, as `Paper::set_chips` takes them.
 fn chips(spans: &Spans, colors: &crate::palettes::Colors) -> Vec<(Range<usize>, gdk::RGBA)> {
     let code = render::rgba(colors.code_background, 1.0);
-    let tag = render::rgba(colors.accent, 0.14);
+    let tag = render::rgba(colors.accent, 0.10);
     let mut chips: Vec<_> = spans
         .of(Kind::Code)
         .iter()

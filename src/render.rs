@@ -588,12 +588,12 @@ impl<'m> Renderer<'m> {
                     LinkType::Email => format!("mailto:{dest_url}"),
                     _ => dest_url.to_string(),
                 };
-                // A link to a note that doesn't exist yet is fainter, as in Obsidian.
+                // A link to a note that doesn't exist yet is fainter, as in Obsidian (still readable).
                 let path = links::split(&url).path;
                 let missing = !links::has_scheme(&url) && !path.is_empty() && (self.find)(&path).is_none();
-                let link = theme::colors().link;
+                let link = if missing { faint_link() } else { theme::colors().link };
                 let tag = gtk::TextTag::builder()
-                    .foreground_rgba(&gdk::RGBA::new(link.r as f32, link.g as f32, link.b as f32, if missing { 0.55 } else { 1.0 }))
+                    .foreground(link.to_hex())
                     .underline(pango::Underline::Single)
                     .build();
                 self.buffer.tag_table().add(&tag);
@@ -667,8 +667,8 @@ impl<'m> Renderer<'m> {
                     let first = self.buffer.create_mark(None, &self.buffer.iter_at_offset(start), true);
                     let last = self.buffer.create_mark(None, &self.buffer.end_iter(), true);
                     let look = Look::Box(rgba(theme::colors().code_background, 1.0));
-                    // Its text is 12 px in from the margin; its box, 4.
-                    self.panels.push(Panel { start: first, end: last, inset: self.margin + 4 - self.origin, look, rtl: false, fold: None });
+                    // Its box where text starts, as a callout's; its text 12 px in from it.
+                    self.panels.push(Panel { start: first, end: last, inset: self.margin - self.origin, look, rtl: false, fold: None });
                     if let Some(language) = self.code_language.take() {
                         let start = self.buffer.create_mark(None, &self.buffer.iter_at_offset(start), true);
                         let end = self.buffer.create_mark(None, &self.buffer.end_iter(), true);
@@ -829,10 +829,9 @@ impl<'m> Renderer<'m> {
             None => name.to_owned(),
         };
         // Its name links to it; fainter when it doesn't exist yet, as other links.
-        let link = theme::colors().link;
-        let alpha = if file.is_some() { 1.0 } else { 0.55 };
+        let link = if file.is_some() { theme::colors().link } else { faint_link() };
         let tag = gtk::TextTag::builder()
-            .foreground_rgba(&gdk::RGBA::new(link.r as f32, link.g as f32, link.b as f32, alpha))
+            .foreground(link.to_hex())
             .weight(600)
             .build();
         self.buffer.tag_table().add(&tag);
@@ -916,7 +915,7 @@ impl<'m> Renderer<'m> {
         let pill = gtk::TextTag::builder().foreground(accent.to_hex()).build();
         self.buffer.tag_table().add(&pill);
         self.targets.push((pill.clone(), Target::Tag(tag.to_owned())));
-        self.chip(tag, pill, "", "", rgba(accent, 0.14));
+        self.chip(tag, pill, "", "", rgba(accent, 0.10));
     }
 
     /// `text` as `styled` writes it, on a chip of `color` the view draws (out of a table: in
@@ -1613,6 +1612,12 @@ pub fn display_width(text: &str) -> usize {
             _ => 1,
         })
         .sum()
+}
+
+/// The colour of a link to a note not written yet: the link's, lighter, still readable (3:1).
+fn faint_link() -> crate::color::Rgb {
+    let colors = theme::colors();
+    colors.link.mix(colors.background, 0.4).readable_on(colors.background, 3.0)
 }
 
 /// A Mermaid diagram nevis draws (flowcharts, state, class, sequence and Gantt diagrams),

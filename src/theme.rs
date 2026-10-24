@@ -341,7 +341,7 @@ fn chrome_css(c: &Colors) -> String {
          /* No padding above and below a row: its indent guides join up with the next row's. */
          .nevis-sidebar > row {{ padding: 0 10px 0 4px; border-radius: 6px; margin: 0 6px; color: {text}; }}
          .nevis-sidebar > row:hover {{ background: alpha({text}, 0.05); }}
-         .nevis-sidebar > row:selected {{ background: alpha({accent}, 0.16); color: {accent}; }}
+         .nevis-sidebar > row:selected {{ background: alpha({accent}, 0.12); color: {text}; }}
          /* The user's GTK stylesheet may colour labels in rows itself; these follow the row. */
          .nevis-sidebar-name {{ padding: 4px 0; color: inherit; }}
          .nevis-sidebar-arrow, .nevis-file-icon {{ color: {dim}; }}
@@ -366,6 +366,9 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-outline-empty {{ color: {dim}; padding: 6px 2px; }}
          .nevis-toast {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 999px; padding: 6px 16px;
              box-shadow: 0 6px 18px alpha(black, 0.28); }}
+         /* The user's GTK stylesheet may colour labels in rows itself; these follow the row. */
+         .nevis-switcher-list > row, .nevis-complete-list > row {{ color: {text}; }}
+         .nevis-switcher-list > row label:not(.nevis-help-keys), .nevis-complete-list > row label {{ color: inherit; }}
          .nevis-switcher-list > row {{ padding: 6px 8px; border-radius: 8px; }}
          .nevis-switcher-list > row:selected {{ background: alpha({text}, 0.08); color: {text}; }}
          .nevis-prompt-error {{ color: {error}; }}
@@ -378,12 +381,12 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-help-keys {{ color: {dim}; font-size: 0.9em; font-feature-settings: \"tnum\"; }}
          /* The tab bar and the sidebar are the window's frame, in the surface colour; the tab in
             front is cut from the page, in its colour, so it reads as the page's own. */
-         .nevis-tabbar {{ background: {surface}; padding: 3px 8px 0 8px; }}
+         .nevis-tabbar {{ background: {surface}; padding: 3px 8px 0 8px; box-shadow: inset 0 -1px alpha({border}, 0.8); }}
          .nevis-tab {{ padding: 0 4px 0 12px; margin-right: 2px; border-radius: 8px 8px 0 0; color: {dim};
              transition: color 120ms ease, background-color 120ms ease; }}
          .nevis-tab > label {{ padding: 4px 0; }}
          .nevis-tab:hover {{ color: {text}; background-color: alpha({text}, 0.05); }}
-         .nevis-tab.current {{ color: {text}; background-color: {background}; }}
+         .nevis-tab.current {{ color: {text}; background-color: {background}; box-shadow: 0 1px {background}, inset 0 1px alpha({border}, 0.5); }}
          .nevis-tab.current > .nevis-tab-title {{ font-weight: 500; }}
          .nevis-tab > .nevis-tab-number {{ margin-right: 6px; color: {accent}; font-weight: 600; }}
          .nevis-tab-close {{ min-width: 10px; padding: 0 6px; margin: 3px 0; color: transparent; border-radius: 999px;

@@ -174,7 +174,9 @@ impl Editor {
         reader.set_right_margin(render::MARGIN);
         reader.set_top_margin(18);
         reader.set_bottom_margin(28);
+        // Lines broken in the note as far apart as wrapped ones.
         reader.set_pixels_inside_wrap(6);
+        reader.set_pixels_above_lines(6);
         reader.set_extra_menu(Some(&crate::window::menu_model()));
 
         let edit_scroller = gtk::ScrolledWindow::builder().child(&view).build();
