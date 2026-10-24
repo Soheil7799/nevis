@@ -19,6 +19,7 @@ const fn row(what: &'static str, action: &'static str, also: &'static str) -> Ro
 const LEFT: &[(&str, &[Row])] = &[
     ("File", &[
         row("New note (named, in a folder window)", "win.new-note", ""),
+        row("New note from a template", "win.new-from-template", ""),
         row("New tab", "win.new-tab", ""),
         row("New window", "app.new-window", ""),
         row("Open a file", "win.open", ""),
@@ -128,8 +129,9 @@ pub fn build(app: &gtk::Application, close: impl Fn() + 'static) -> gtk::Widget 
 
 /// A command the palette offers: what it does, its action, and its keys.
 pub struct Command {
-    pub what: &'static str,
-    pub action: &'static str,
+    pub what: String,
+    /// A detailed action name: "win.open", or with its argument, "win.switch-to('/a.md')".
+    pub action: String,
     pub keys: String,
 }
 
@@ -148,7 +150,7 @@ pub fn commands(app: &gtk::Application) -> Vec<Command> {
         .filter(|row| !row.action.is_empty())
         .map(|row| {
             let what = HALVES.iter().find(|(action, _)| *action == row.action).map_or(row.what, |(_, what)| what);
-            Command { what, action: row.action, keys: keys(app, &Row { also: "", ..*row }) }
+            Command { what: what.to_owned(), action: row.action.to_owned(), keys: keys(app, &Row { also: "", ..*row }) }
         })
         .collect()
 }

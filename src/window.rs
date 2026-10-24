@@ -488,7 +488,13 @@ impl Window {
             }
         });
         self.with_path("switch-to", |w, file| w.open(file, None, How::Replace));
-        self.with_path("note-new", |w, folder| w.ask_new_note(folder));
+        self.with_path("note-new", |w, folder| w.ask_new_note(folder, None));
+        self.action("new-from-template", |w| w.pick_template());
+        self.with_path("note-from-template", |w, template| {
+            if let Some(folder) = w.note_folder() {
+                w.ask_new_note(folder, Some(template));
+            }
+        });
         self.with_path("note-rename", |w, file| w.ask_rename(file));
         self.with_path("note-trash", |w, file| spawn(w.clone().trash(file)));
         self.with_path("note-reveal", |w, file| {
@@ -496,7 +502,7 @@ impl Window {
         });
         // A named note in a folder window; elsewhere a new tab.
         self.action("new-note", |w| match w.note_folder().filter(|_| w.folder.borrow().is_some()) {
-            Some(folder) => w.ask_new_note(folder),
+            Some(folder) => w.ask_new_note(folder, None),
             None => {
                 w.new_tab();
             }
@@ -965,21 +971,7 @@ impl Window {
 
     /// The command palette: every command that can run now, to run one by its name.
     fn toggle_palette(self: &Rc<Self>) {
-        let existing = self.palette.borrow().clone();
-        let palette = match existing {
-            Some(palette) => palette,
-            None => {
-                let window = self.window.downgrade();
-                let palette = Palette::new(move |action| {
-                    if let Some(window) = window.upgrade() {
-                        let _ = WidgetExt::activate_action(&window, action, None);
-                    }
-                });
-                self.add_popup(&palette.widget);
-                *self.palette.borrow_mut() = Some(palette.clone());
-                palette
-            }
-        };
+        let palette = self.palette();
         if palette.is_open() {
             return palette.hide();
         }
@@ -990,8 +982,77 @@ impl Window {
             Some(("app", name)) => app.lookup_action(name).is_some_and(|action| action.is_enabled()),
             _ => false,
         };
-        let commands = crate::help::commands(&app).into_iter().filter(|command| command.action != "win.palette" && can_run(command.action)).collect();
-        palette.show(commands);
+        let commands = crate::help::commands(&app).into_iter().filter(|command| command.action != "win.palette" && can_run(&command.action)).collect();
+        palette.show(commands, "Run a command");
+    }
+
+    /// The palette, made on first use, toggled: the open one closes instead (`None`).
+    fn palette_popup(self: &Rc<Self>) -> Option<Rc<Palette>> {
+        let palette = self.palette();
+        if palette.is_open() {
+            palette.hide();
+            return None;
+        }
+        Some(palette)
+    }
+
+    /// The command palette, made on first use; it runs detailed action names.
+    fn palette(self: &Rc<Self>) -> Rc<Palette> {
+        if let Some(palette) = self.palette.borrow().clone() {
+            return palette;
+        }
+        let window = self.window.downgrade();
+        let palette = Palette::new(move |action| {
+            if let Some(window) = window.upgrade()
+                && let Ok((name, target)) = gio::Action::parse_detailed_name(action)
+            {
+                let _ = WidgetExt::activate_action(&window, &name, target.as_ref());
+            }
+        });
+        self.add_popup(&palette.widget);
+        *self.palette.borrow_mut() = Some(palette.clone());
+        palette
+    }
+
+    /// The notes in the folder's templates folder, to start a new note from (with its name
+    /// asked for next).
+    fn pick_template(self: &Rc<Self>) {
+        let Some(root) = self.folder() else {
+            return alert(&self.window, "Templates are in a folder", "Open a folder first (Ctrl+Shift+O), with your templates in its templates folder.");
+        };
+        let none = None::<&gio::Cancellable>;
+        let obsidian = root
+            .resolve_relative_path(".obsidian/templates.json")
+            .load_contents(none)
+            .ok()
+            .map(|(bytes, _)| String::from_utf8_lossy(&bytes).into_owned());
+        let subfolders = child_names(&root);
+        let subfolders: Vec<&str> = subfolders.iter().map(String::as_str).collect();
+        let templates: Vec<gio::File> = crate::templates::folder(obsidian.as_deref(), &subfolders)
+            .map(|folder| root.resolve_relative_path(folder))
+            .map(|folder| {
+                let mut names = child_names(&folder);
+                names.retain(|name| listing::is_note(name));
+                names.sort_by_key(|name| name.to_lowercase());
+                names.iter().map(|name| folder.child(name)).collect()
+            })
+            .unwrap_or_default();
+        if templates.is_empty() {
+            return alert(&self.window, "No templates yet", "Put notes in a folder called templates (or the one Obsidian's Templates settings name), then try again.");
+        }
+        let commands = templates
+            .iter()
+            .filter_map(|template| {
+                let path = template.path()?;
+                let name = template.basename()?.to_string_lossy().into_owned();
+                let what = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
+                let action = gio::Action::print_detailed_name("win.note-from-template", Some(&path.to_string_lossy().to_variant()));
+                Some(crate::help::Command { what, action: action.to_string(), keys: String::new() })
+            })
+            .collect();
+        if let Some(palette) = self.palette_popup() {
+            palette.show(commands, "New note from template");
+        }
     }
 
     fn pick_theme(self: &Rc<Self>) {
@@ -1075,7 +1136,8 @@ impl Window {
     }
 
     /// Asks for a name, creates the note in `folder`, and opens it to type into.
-    fn ask_new_note(self: &Rc<Self>, folder: gio::File) {
+    /// Asks for a new note's name, and makes it in `folder`: empty, or from `template`.
+    fn ask_new_note(self: &Rc<Self>, folder: gio::File, template: Option<gio::File>) {
         let suggestion = names::new_note(&child_names(&folder));
         let (checked, weak) = (folder.clone(), Rc::downgrade(self));
         self.prompt().ask(
@@ -1091,9 +1153,20 @@ impl Window {
             move |name| {
                 let Some(this) = weak.upgrade() else { return };
                 let file = folder.child(&name);
-                match file.create(gio::FileCreateFlags::NONE, None::<&gio::Cancellable>) {
+                let none = None::<&gio::Cancellable>;
+                let text = template.as_ref().and_then(|template| template.load_contents(none).ok()).map(|(bytes, _)| {
+                    let title = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
+                    let now = glib::DateTime::now_local().ok();
+                    let date = now.as_ref().map_or((1970, 1, 1), |now| (now.year(), now.month() as u32, now.day_of_month() as u32));
+                    let time = now.as_ref().map_or((0, 0), |now| (now.hour() as u32, now.minute() as u32));
+                    crate::templates::fill(&String::from_utf8_lossy(&bytes), &title, date, time)
+                });
+                match file.create(gio::FileCreateFlags::NONE, none) {
                     Ok(stream) => {
-                        let _ = stream.close(None::<&gio::Cancellable>);
+                        if let Some(text) = &text {
+                            let _ = stream.write_all(text.as_bytes(), none);
+                        }
+                        let _ = stream.close(none);
                         vault::forget();
                         this.open(file, Some(OnLoad::Edit), How::NewTab);
                     }

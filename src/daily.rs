@@ -26,7 +26,7 @@ pub fn path(date: (i32, u32, u32), obsidian: Option<&str>, subfolders: &[&str]) 
 
 /// The date written in a moment.js-style `format` ("YYYY-MM-DD", "DD.MM.YY", "[Day] D"), or
 /// `None` when it has words nevis doesn't write (weekday and month names).
-fn written(format: &str, (year, month, day): (i32, u32, u32)) -> Option<String> {
+pub fn written(format: &str, (year, month, day): (i32, u32, u32)) -> Option<String> {
     let mut out = String::new();
     let mut chars = format.chars().peekable();
     while let Some(c) = chars.next() {
@@ -57,7 +57,7 @@ fn written(format: &str, (year, month, day): (i32, u32, u32)) -> Option<String> 
 }
 
 /// A string setting from Obsidian's (flat) JSON settings: `"key": "value"`.
-fn setting(json: &str, key: &str) -> Option<String> {
+pub fn setting(json: &str, key: &str) -> Option<String> {
     let quoted = format!("\"{key}\"");
     let after = &json[json.find(&quoted)? + quoted.len()..];
     let mut chars = after.trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?.chars();

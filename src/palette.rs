@@ -64,8 +64,9 @@ impl Palette {
     }
 
     /// Opens on `commands`, those that can run now.
-    pub fn show(&self, commands: Vec<Command>) {
+    pub fn show(&self, commands: Vec<Command>, placeholder: &str) {
         *self.commands.borrow_mut() = commands;
+        self.entry.set_placeholder_text(Some(placeholder));
         self.entry.set_text("");
         self.fill();
         self.widget.set_visible(true);
@@ -87,7 +88,7 @@ impl Palette {
         for &index in &shown {
             let command = &commands[index];
             let line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-            let what = gtk::Label::builder().label(command.what).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
+            let what = gtk::Label::builder().label(&command.what).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
             let keys = gtk::Label::builder().label(&command.keys).xalign(1.0).css_classes(["nevis-help-keys"]).build();
             line.append(&what);
             line.append(&keys);
@@ -107,10 +108,10 @@ impl Palette {
     /// Runs the selected command.
     fn go(&self) {
         let Some(row) = self.list.selected_row() else { return };
-        let action = self.shown.borrow().get(row.index() as usize).and_then(|&index| self.commands.borrow().get(index).map(|command| command.action));
+        let action = self.shown.borrow().get(row.index() as usize).and_then(|&index| self.commands.borrow().get(index).map(|command| command.action.clone()));
         if let Some(action) = action {
             self.hide();
-            (self.run)(action);
+            (self.run)(&action);
         }
     }
 }

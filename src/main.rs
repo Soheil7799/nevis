@@ -41,6 +41,7 @@ mod state;
 mod sidebar;
 mod style;
 mod switcher;
+mod templates;
 mod theme;
 mod vault;
 mod window;
