@@ -101,6 +101,8 @@ pub struct Editor {
     /// Focus mode (the window's): what fades all but the paragraph being written, once made.
     focus_mode: Cell<bool>,
     faded: RefCell<Option<gtk::TextTag>>,
+    /// The paragraph focus mode last kept bright: its start, end, and the text's length then.
+    focused: Cell<Option<(i32, i32, i32)>>,
     /// Side by side: the source and the rendered view in one pane each, the rendered one
     /// following the typing; and the rendering waiting for the typing to pause.
     split: RefCell<Option<gtk::Paned>>,
@@ -246,6 +248,7 @@ impl Editor {
             copied: RefCell::new(None),
             focus_mode: Cell::new(false),
             faded: RefCell::new(None),
+            focused: Cell::new(None),
             split: RefCell::new(None),
             rerender_due: RefCell::new(None),
             reader_margin: Cell::new(render::MARGIN),
@@ -257,6 +260,16 @@ impl Editor {
         zoom_on_ctrl_scroll(&edit_scroller);
         zoom_on_ctrl_scroll(&read_scroller);
         // Side by side, the rendered view follows the source as it scrolls.
+        // Focus mode follows the cursor, typed along or moved (typing moves it without a
+        // mark-set).
+        let weak = Rc::downgrade(&editor);
+        editor.buffer.connect_cursor_position_notify(move |_| {
+            if let Some(editor) = weak.upgrade()
+                && editor.focus_mode.get()
+            {
+                editor.refocus();
+            }
+        });
         let weak = Rc::downgrade(&editor);
         edit_scroller.vadjustment().connect_page_size_notify(move |_| {
             if let Some(editor) = weak.upgrade()
@@ -554,9 +567,6 @@ impl Editor {
                 Some("insert") => {
                     editor.styler.cursor_moved();
                     editor.queue_completion();
-                    if editor.focus_mode.get() {
-                        editor.refocus();
-                    }
                 }
                 Some("selection_bound") => editor.styler.cursor_moved(),
                 _ => {}
@@ -1032,28 +1042,39 @@ impl Editor {
 
     fn refocus(&self) {
         let (start, end) = (self.buffer.start_iter(), self.buffer.end_iter());
-        if let Some(tag) = self.faded.borrow().as_ref() {
-            self.buffer.remove_tag(tag, &start, &end);
-        }
         if !self.focus_mode.get() {
+            if let Some(tag) = self.faded.borrow().as_ref() {
+                self.buffer.remove_tag(tag, &start, &end);
+            }
+            self.focused.set(None);
+            self.view.set_bright(None);
             return;
         }
         let tag = self.faded.borrow_mut().get_or_insert_with(|| {
-            let text = theme::colors().text;
-            let tag = gtk::TextTag::builder().foreground_rgba(&render::rgba(text, 0.32)).build();
+            let tag = gtk::TextTag::new(None);
             self.buffer.tag_table().add(&tag);
             tag
         }).clone();
+        // In the palette now in use (it may have changed since).
+        tag.set_foreground_rgba(Some(&render::rgba(theme::colors().text, crate::paper::FADED)));
         // Over every other tag's colour, those made since included.
         tag.set_priority(self.buffer.tag_table().size() - 1);
         self.styler.keep_hidden_on_top();
         let insert = self.buffer.get_insert();
         let (from, to) = paragraph_around(&self.buffer.iter_at_mark(&insert));
-        self.buffer.apply_tag(&tag, &start, &from);
-        self.buffer.apply_tag(&tag, &to, &end);
+        // Tagged again only when the paragraph is another, or has grown.
+        let paragraph = (from.offset(), to.offset(), self.buffer.char_count());
+        if self.focused.replace(Some(paragraph)) != Some(paragraph) {
+            self.buffer.remove_tag(&tag, &start, &end);
+            self.buffer.apply_tag(&tag, &start, &from);
+            self.buffer.apply_tag(&tag, &to, &end);
+            self.view.set_bright(Some(from.offset() as usize..to.offset() as usize + 1));
+        }
         let half = (self.view.height() / 2).max(12);
-        self.view.set_top_margin(half);
-        self.view.set_bottom_margin(half);
+        if self.view.top_margin() != half {
+            self.view.set_top_margin(half);
+            self.view.set_bottom_margin(half);
+        }
         self.view.scroll_to_mark(&insert, 0.0, true, 0.0, 0.5);
     }
 

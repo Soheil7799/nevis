@@ -38,6 +38,8 @@ mod imp {
         pub marks: RefCell<Vec<(Range<usize>, Mark)>>,
         /// Rounded backgrounds behind inline code and #tags: character ranges, sorted.
         pub chips: RefCell<Vec<(Range<usize>, gdk::RGBA)>>,
+        /// Focus mode: the paragraph written in (characters); what is drawn outside it fades.
+        pub bright: RefCell<Option<Range<usize>>>,
         /// Live Preview's blocks: those asked for (lines, kind, source), those drawn, and the
         /// room kept above the first line of those taller drawn than written.
         pub wanted: RefCell<Vec<(Range<usize>, Block, String)>>,
@@ -165,6 +167,20 @@ impl Paper {
             }
         }
         self.queue_draw();
+    }
+
+    /// Focus mode: what is drawn outside `bright` (a character range) fades as its text does;
+    /// `None`, nothing fades.
+    pub fn set_bright(&self, bright: Option<Range<usize>>) {
+        if *self.imp().bright.borrow() != bright {
+            *self.imp().bright.borrow_mut() = bright;
+            self.queue_draw();
+        }
+    }
+
+    /// Whether what is drawn for `range` fades (focus mode, away from the paragraph written).
+    fn fades(&self, range: &Range<usize>) -> bool {
+        self.imp().bright.borrow().as_ref().is_some_and(|bright| range.end <= bright.start || range.start >= bright.end)
     }
 
     /// Draws rounded backgrounds behind `chips` (sorted character ranges of the buffer shown
@@ -641,6 +657,10 @@ fn draw_blocks(view: &Paper, blocks: &[(Range<usize>, Rc<Drawing>)], rows: &[Row
         }
         let cover = graphene::Rect::new(seen.x() as f32, y as f32, seen.width() as f32, height as f32);
         snapshot.append_color(&render::rgba(colors.background, 1.0), &cover);
+        let fades = view.fades(range);
+        if fades {
+            snapshot.push_opacity(f64::from(FADED));
+        }
         let (width, tall) = drawing.size(room);
         let top = (y as f32 + (height as f32 - tall) / 2.0).round();
         match drawing.as_ref() {
@@ -668,32 +688,40 @@ fn draw_blocks(view: &Paper, blocks: &[(Range<usize>, Rc<Drawing>)], rows: &[Row
                 snapshot.restore();
             }
             Drawing::Table(cells, columns, rows) => {
+                // As the rendered view draws one: a rule under the header (in dim) and between
+                // the rows, no box.
                 let frame = graphene::Rect::new(left, top, width.min(room), tall);
-                let rounded = gsk::RoundedRect::from_rect(frame, 6.0);
                 snapshot.push_clip(&frame);
-                snapshot.push_rounded_clip(&rounded);
-                snapshot.append_color(&render::rgba(colors.surface, 1.0), &frame);
-                snapshot.pop();
                 let mut row_top = top + 1.0 + CELL_TOP;
                 for (row, laid) in cells.iter().enumerate() {
-                    let mut column_left = left + 1.0 + CELL_SIDE;
+                    let mut column_left = left;
+                    let ink = if row == 0 { colors.dim } else { colors.text };
                     for ((layout, xalign), column) in laid.iter().zip(columns) {
                         let x = column_left + (column - layout.pixel_size().0 as f32) * xalign;
                         snapshot.save();
                         snapshot.translate(&graphene::Point::new(x.round(), row_top.round()));
-                        snapshot.append_layout(layout, &render::rgba(colors.text, 1.0));
+                        snapshot.append_layout(layout, &render::rgba(ink, 1.0));
                         snapshot.restore();
                         column_left += column + COLUMN_GAP;
                     }
                     row_top += rows[row] + ROW_GAP;
+                    if row + 1 < cells.len() {
+                        let rule = (row_top - ROW_GAP / 2.0).round();
+                        let color = if row == 0 { render::rgba(colors.dim, 0.5) } else { render::rgba(colors.border, 1.0) };
+                        snapshot.append_color(&color, &graphene::Rect::new(left, rule, column_left - COLUMN_GAP - left, 1.0));
+                    }
                 }
-                let border = render::rgba(colors.border, 1.0);
-                snapshot.append_border(&rounded, &[1.0; 4], &[border; 4]);
                 snapshot.pop();
             }
         }
+        if fades {
+            snapshot.pop();
+        }
     }
 }
+
+/// How faded what focus mode fades is drawn, as its text is (`Editor::refocus`).
+pub const FADED: f32 = 0.32;
 
 /// Where the character at `iter` is drawn: its left edge (its right one in right-to-left
 /// text), and its line's top and height. GTK's `iter_location` places a character as if the
@@ -741,6 +769,10 @@ fn draw_panels(view: &Paper, panels: &[Panel], snapshot: &gtk::Snapshot) {
             continue;
         }
         let (start, end) = (left + panel.inset as f32, right - panel.inset as f32);
+        let fades = view.fades(&(first.offset() as usize..last.offset() as usize + 1));
+        if fades {
+            snapshot.push_opacity(f64::from(FADED));
+        }
         match &panel.look {
             Look::Box(color) => {
                 let rect = graphene::Rect::new(start, y as f32, end - start, height as f32);
@@ -752,6 +784,9 @@ fn draw_panels(view: &Paper, panels: &[Panel], snapshot: &gtk::Snapshot) {
                 let x = if panel.rtl { end - 3.0 } else { start };
                 snapshot.append_color(color, &graphene::Rect::new(x, y as f32, 3.0, height as f32));
             }
+        }
+        if fades {
+            snapshot.pop();
         }
     }
 }
@@ -785,6 +820,13 @@ fn draw_chips(view: &Paper, chips: &[(Range<usize>, gdk::RGBA)], snapshot: &gtk:
             break;
         }
         let (start, end) = (buffer.iter_at_offset(range.start as i32), buffer.iter_at_offset(range.end as i32));
+        let faded;
+        let color = if view.fades(range) {
+            faded = gdk::RGBA::new(color.red(), color.green(), color.blue(), color.alpha() * FADED);
+            &faded
+        } else {
+            color
+        };
         if place(view, &start).y() == place(view, &end).y() {
             piece(&start, &end, color);
             continue;
@@ -826,6 +868,10 @@ fn draw_marks(view: &Paper, marks: &[(Range<usize>, Mark)], snapshot: &gtk::Snap
         let start = buffer.iter_at_offset(range.start as i32);
         let at = place(view, &start);
         let (x, y, height) = (at.x() as f32, at.y() as f32, at.height() as f32);
+        let fades = view.fades(range);
+        if fades {
+            snapshot.push_opacity(f64::from(FADED));
+        }
         match mark {
             Mark::Bullet => {
                 let mut next = start;
@@ -890,6 +936,9 @@ fn draw_marks(view: &Paper, marks: &[(Range<usize>, Mark)], snapshot: &gtk::Snap
                 snapshot.append_layout(&layout, &render::rgba(render::callout_color(kind), 1.0));
                 snapshot.restore();
             }
+        }
+        if fades {
+            snapshot.pop();
         }
     }
 }

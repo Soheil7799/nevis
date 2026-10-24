@@ -334,8 +334,8 @@ fn chrome_css(c: &Colors) -> String {
         ".nevis-find {{ padding: 6px 10px; background: {surface}; border-bottom: 1px solid alpha({border}, 0.6); }}
          .nevis-table {{ border: none; background: none; }}
          .nevis-table-head, .nevis-table-cell {{ padding: 7px 22px 7px 0; }}
-         .nevis-table-head {{ color: {dim}; border-bottom: 1px solid {border}; }}
-         .nevis-table-cell {{ border-bottom: 1px solid alpha({border}, 0.5); }}
+         .nevis-table-head {{ color: {dim}; border-bottom: 1px solid alpha({dim}, 0.5); }}
+         .nevis-table-cell {{ border-bottom: 1px solid {border}; }}
          .nevis-table-cell.last {{ border-bottom: none; }}
          .nevis-sidebar, .nevis-sidebar-pane {{ background: {surface}; }}
          /* No padding above and below a row: its indent guides join up with the next row's. */

@@ -168,8 +168,8 @@ fn style_paper() {
     css.load_from_string(&format!(
         "textview.nevis-print, textview.nevis-print > text {{ background: none; font-size: {TEXT_PT}pt; }}
          textview.nevis-print label {{ color: {text}; }}
-         textview.nevis-print .nevis-table-head {{ color: {dim}; border-bottom-color: {border}; }}
-         textview.nevis-print .nevis-table-cell {{ border-bottom-color: alpha({border}, 0.5); }}"
+         textview.nevis-print .nevis-table-head {{ color: {dim}; border-bottom-color: alpha({dim}, 0.5); }}
+         textview.nevis-print .nevis-table-cell {{ border-bottom-color: {border}; }}"
     ));
     gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_USER + 3);
 }
