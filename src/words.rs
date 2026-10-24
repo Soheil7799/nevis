@@ -6,7 +6,7 @@ pub fn count(text: &str) -> usize {
     text.split_whitespace().filter(|word| word.chars().any(char::is_alphanumeric)).count()
 }
 
-/// "1,234 words · 6 min read" (none under a minute's worth).
+/// "1,234 words · 6 min read" (any words take a minute; no words, none).
 pub fn summary(text: &str) -> String {
     let words = count(text);
     let number = grouped(words);

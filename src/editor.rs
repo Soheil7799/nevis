@@ -99,6 +99,8 @@ pub struct Editor {
     /// "Copied", shown, and when it goes.
     copied: RefCell<Option<(gtk::Label, glib::SourceId)>>,
     /// Focus mode (the window's): what fades all but the paragraph being written, once made.
+    /// The tab's "1,234 words · 6 min read", until the text changes.
+    length: RefCell<Option<String>>,
     focus_mode: Cell<bool>,
     faded: RefCell<Option<gtk::TextTag>>,
     /// The paragraph focus mode last kept bright: its start, end, and the text's length then.
@@ -248,6 +250,7 @@ impl Editor {
             preview: RefCell::new(None),
             copy_due: RefCell::new(None),
             copied: RefCell::new(None),
+            length: RefCell::new(None),
             focus_mode: Cell::new(false),
             faded: RefCell::new(None),
             focused: Cell::new(None),
@@ -311,7 +314,7 @@ impl Editor {
         let weak = Rc::downgrade(self);
         self.tab.connect_query_tooltip(move |_, _, _, _, tooltip| {
             let Some(editor) = weak.upgrade() else { return false };
-            let length = crate::words::summary(&editor.text());
+            let length = editor.length.borrow_mut().get_or_insert_with(|| crate::words::summary(&editor.text())).clone();
             let text = match editor.location() {
                 Some(location) => format!("{}\n{length}", tilde(&location.parse_name())),
                 None => length,
@@ -448,6 +451,7 @@ impl Editor {
         self.buffer.connect_changed(move |_| {
             if let Some(editor) = weak.upgrade() {
                 editor.rendered.set(false);
+                editor.length.take();
                 if editor.is_split() {
                     editor.queue_rerender();
                 }
@@ -684,12 +688,8 @@ impl Editor {
         self.stack.visible_child_name().as_deref() == Some("read")
     }
 
-    fn is_split(&self) -> bool {
+    pub fn is_split(&self) -> bool {
         self.split.borrow().is_some()
-    }
-
-    pub fn is_side_by_side(&self) -> bool {
-        self.is_split()
     }
 
     /// Whether the rendered view is on screen: alone, or beside the source.
@@ -1955,35 +1955,37 @@ impl Editor {
 
     /// Asks where, then writes the note there as a PDF (see `print`).
     pub async fn export_pdf(self: Rc<Self>) {
-        let name = self.print_name();
-        let stem = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
-        let dialog = gtk::FileDialog::builder().title("Export as PDF").modal(true).initial_name(format!("{stem}.pdf")).build();
-        if let Some(folder) = self.location().and_then(|l| l.parent()) {
-            dialog.set_initial_folder(Some(&folder));
+        if let Some(file) = self.export_to("Export as PDF", "pdf").await {
+            self.print(Some(file)).await;
         }
-        let Ok(file) = dialog.save_future(Some(&self.window)).await else { return };
-        self.print(Some(file)).await;
     }
 
     /// Saves the note as one HTML page (see `html::page`), where the user picks.
     pub async fn export_html(self: Rc<Self>) {
-        let name = self.print_name();
-        let stem = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
-        let dialog = gtk::FileDialog::builder().title("Export as HTML").modal(true).initial_name(format!("{stem}.html")).build();
-        let folder = self.location().and_then(|l| l.parent());
-        if let Some(folder) = &folder {
-            dialog.set_initial_folder(Some(folder));
-        }
-        let Ok(file) = dialog.save_future(Some(&self.window)).await else { return };
-        if let Some(path) = file.path() {
+        if let Some(path) = self.export_to("Export as HTML", "html").await.and_then(|file| file.path()) {
             self.write_html(&path);
         }
     }
 
+    /// Asks where to export the note: named after it with `extension`, beside it.
+    async fn export_to(&self, title: &str, extension: &str) -> Option<gio::File> {
+        let name = format!("{}.{extension}", self.print_stem());
+        let dialog = gtk::FileDialog::builder().title(title).modal(true).initial_name(name).build();
+        if let Some(folder) = self.location().and_then(|l| l.parent()) {
+            dialog.set_initial_folder(Some(&folder));
+        }
+        dialog.save_future(Some(&self.window)).await.ok()
+    }
+
+    /// The note's name without its extension ("plan" for plan.md).
+    fn print_stem(&self) -> String {
+        let name = self.print_name();
+        std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned())
+    }
+
     /// Writes the note as an HTML page to `path`.
     pub fn write_html(&self, path: &std::path::Path) {
-        let name = self.print_name();
-        let stem = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
+        let stem = self.print_stem();
         let folder = self.location().and_then(|l| l.parent());
         let find = |link: &str| self.find(link);
         let folder = folder.and_then(|f| f.path());

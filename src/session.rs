@@ -120,7 +120,7 @@ pub fn store(session: &Session) {
 }
 
 /// `windows` as one window: all their tabs in order, a file open in several once (with its
-/// unsaved text, if one has some), the first folder any showed, and the first window's tab in
+/// unsaved text, if one has some; if two have, the other as a note of its own), the first folder any showed, and the first window's tab in
 /// front. A session comes back as tabs, not as a window for every file once opened.
 pub fn merged(windows: Vec<WindowState>) -> Option<WindowState> {
     let folder = windows.iter().find_map(|window| window.folder.clone());
@@ -131,12 +131,19 @@ pub fn merged(windows: Vec<WindowState>) -> Option<WindowState> {
             let front = n == 0 && i == window.active;
             let twin = tab.path.as_ref().and_then(|path| tabs.iter().position(|t| t.path.as_ref() == Some(path)));
             let at = match twin {
-                Some(at) => {
-                    if tabs[at].draft.is_none() && tab.draft.is_some() {
+                Some(at) => match (&tabs[at].draft, &tab.draft) {
+                    (None, Some(_)) => {
                         tabs[at] = tab;
+                        at
                     }
-                    at
-                }
+                    // Unsaved text in both: the second comes back as a note of its own,
+                    // unsaved, rather than lost.
+                    (Some(_), Some(_)) => {
+                        tabs.push(TabState { path: None, ..tab });
+                        tabs.len() - 1
+                    }
+                    _ => at,
+                },
                 None => {
                     tabs.push(tab);
                     tabs.len() - 1
@@ -225,6 +232,10 @@ mod tests {
         assert_eq!(Session::parse(&session.to_text()), session);
     }
 
+    fn a_unsaved_too() -> TabState {
+        tab(Some("/n/a.md"), Some("77"), 5, 0, false)
+    }
+
     #[test]
     fn a_session_of_many_windows_comes_back_as_one_with_all_their_tabs() {
         let a = tab(Some("/n/a.md"), None, 1, 0, false);
@@ -243,6 +254,15 @@ mod tests {
             Some(WindowState { folder: Some("/n".into()), active: 1, tabs: vec![a_unsaved, b, draft] })
         );
         assert_eq!(merged(Vec::new()), None);
+        // Unsaved text in two windows: none of it lost.
+        let other = tab(Some("/n/a.md"), Some("88"), 1, 0, false);
+        let both = vec![
+            WindowState { folder: None, active: 0, tabs: vec![a_unsaved_too()] },
+            WindowState { folder: None, active: 0, tabs: vec![other] },
+        ];
+        let tabs = merged(both).unwrap().tabs;
+        assert_eq!(tabs.iter().filter_map(|t| t.draft.as_deref()).collect::<Vec<_>>(), ["77", "88"]);
+        assert_eq!(tabs[1].path, None);
     }
 
     #[test]

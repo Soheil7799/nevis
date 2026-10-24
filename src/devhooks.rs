@@ -209,9 +209,9 @@ fn type_text(window: &gtk::ApplicationWindow) -> bool {
     if let Some(view) = focus.clone().and_downcast::<gtk::TextView>() {
         let mut rest = text.as_str();
         while !rest.is_empty() {
-            let (typed, key) = match rest.find('{').zip(rest.find('}')) {
-                Some((open, close)) if open < close => (&rest[..open], Some(&rest[open + 1..close])),
-                _ => (rest, None),
+            let (typed, key) = match rest.find('{').and_then(|open| Some((open, open + rest[open..].find('}')?))) {
+                Some((open, close)) => (&rest[..open], Some(&rest[open + 1..close])),
+                None => (rest, None),
             };
             if !typed.is_empty() {
                 view.buffer().delete_selection(true, true);

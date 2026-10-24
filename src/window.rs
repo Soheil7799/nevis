@@ -428,7 +428,7 @@ impl Window {
             }
         }
         self.on_current("side-by-side", |_, e| {
-            let on = !e.is_side_by_side();
+            let on = !e.is_split();
             e.set_side_by_side(on);
         });
         self.on_current("history", |w, e| {
