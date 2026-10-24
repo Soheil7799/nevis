@@ -409,6 +409,18 @@ impl Window {
         self.on_current("print", |_, e| spawn(e.print(None)));
         self.on_current("export-pdf", |_, e| spawn(e.export_pdf()));
         self.on_current("export-html", |_, e| spawn(e.export_html()));
+        {
+            use crate::tables::{Align, Edit};
+            for (name, edit) in [
+                ("table-add-column", Edit::AddColumn),
+                ("table-delete-column", Edit::DeleteColumn),
+                ("table-align-left", Edit::Align(Align::Left)),
+                ("table-align-center", Edit::Align(Align::Center)),
+                ("table-align-right", Edit::Align(Align::Right)),
+            ] {
+                self.on_current(name, move |_, e| e.table_command(edit));
+            }
+        }
         self.on_current("side-by-side", |_, e| {
             let on = !e.is_side_by_side();
             e.set_side_by_side(on);

@@ -1,10 +1,10 @@
 //! Markdown tables as you edit them: Tab and Shift+Tab go from cell to cell, Enter starts a
-//! row, and the columns line up each time.
+//! row, columns are added, taken out and aligned, and the columns line up each time.
 
 use crate::render::display_width;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Align {
+pub enum Align {
     None,
     Left,
     Center,
@@ -18,12 +18,17 @@ pub struct Table {
     aligns: Vec<Align>,
 }
 
-/// Where Tab, Shift+Tab or Enter go.
+/// What is done from a cell: Tab, Shift+Tab, Enter, or a table command.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Move {
+pub enum Edit {
     Next,
     Previous,
     NewRow,
+    /// A column after the cell's.
+    AddColumn,
+    /// The cell's column taken out (never the last one).
+    DeleteColumn,
+    Align(Align),
 }
 
 /// The table's lines around line `at` of `lines`: the first and last (inclusive), when `at`
@@ -151,22 +156,41 @@ impl Table {
     /// The table after `how` from the cell at `line` (of its lines, the divider counted) and
     /// `cell`: its lines, and where the cursor goes, as a line and a character range in it
     /// (the cell's text, to type over).
-    pub fn step(mut self, line: usize, cell: usize, how: Move) -> (Vec<String>, usize, std::ops::Range<usize>) {
+    pub fn step(mut self, line: usize, cell: usize, how: Edit) -> (Vec<String>, usize, std::ops::Range<usize>) {
         let columns = self.aligns.len();
         // Rows of `self.rows`: the header is 0, the divider has none.
         let row = if line == 0 { 0 } else { line.saturating_sub(1).max(1).min(self.rows.len()) };
         let cell = cell.min(columns - 1);
         let (row, cell) = match how {
-            Move::Next if cell + 1 < columns => (row, cell + 1),
-            Move::Next | Move::NewRow => {
-                if how == Move::NewRow || row + 1 == self.rows.len() {
+            Edit::Next if cell + 1 < columns => (row, cell + 1),
+            Edit::Next | Edit::NewRow => {
+                if how == Edit::NewRow || row + 1 == self.rows.len() {
                     self.rows.insert(row + 1, vec![String::new(); columns]);
                 }
                 (row + 1, 0)
             }
-            Move::Previous if cell > 0 => (row, cell - 1),
-            Move::Previous if row > 0 => (row - 1, columns - 1),
-            Move::Previous => (0, 0),
+            Edit::Previous if cell > 0 => (row, cell - 1),
+            Edit::Previous if row > 0 => (row - 1, columns - 1),
+            Edit::Previous => (0, 0),
+            Edit::AddColumn => {
+                self.aligns.insert(cell + 1, Align::None);
+                for cells in &mut self.rows {
+                    cells.insert(cell + 1, String::new());
+                }
+                (row, cell + 1)
+            }
+            Edit::DeleteColumn if columns > 1 => {
+                self.aligns.remove(cell);
+                for cells in &mut self.rows {
+                    cells.remove(cell);
+                }
+                (row, cell.min(columns - 2))
+            }
+            Edit::DeleteColumn => (row, cell),
+            Edit::Align(align) => {
+                self.aligns[cell] = align;
+                (row, cell)
+            }
         };
         let lines = self.lines();
         let at = if row == 0 { 0 } else { row + 1 };
@@ -216,7 +240,7 @@ mod tests {
 
     #[test]
     fn tab_goes_to_the_next_cell_then_the_next_row_then_a_new_one() {
-        let next = |line, cell| Table::parse(TABLE).unwrap().step(line, cell, Move::Next);
+        let next = |line, cell| Table::parse(TABLE).unwrap().step(line, cell, Edit::Next);
         let (_, line, range) = next(0, 0);
         assert_eq!((line, range), (0, 9..15));
         let (_, line, range) = next(2, 1);
@@ -228,11 +252,25 @@ mod tests {
 
     #[test]
     fn shift_tab_goes_back_and_enter_starts_a_row_under_the_cursors() {
-        let (_, line, range) = Table::parse(TABLE).unwrap().step(2, 0, Move::Previous);
+        let (_, line, range) = Table::parse(TABLE).unwrap().step(2, 0, Edit::Previous);
         assert_eq!((line, range), (0, 9..15));
-        let (lines, line, _) = Table::parse(TABLE).unwrap().step(2, 1, Move::NewRow);
+        let (lines, line, _) = Table::parse(TABLE).unwrap().step(2, 1, Edit::NewRow);
         assert_eq!(lines[3], "|      |        |");
         assert_eq!(line, 3);
+    }
+
+    #[test]
+    fn columns_are_added_after_the_cursors_taken_out_and_aligned() {
+        let (lines, line, range) = Table::parse(TABLE).unwrap().step(2, 0, Edit::AddColumn);
+        assert_eq!(lines[0], "| Page |     | Status |");
+        assert_eq!((line, range), (2, 9..9));
+        let (lines, _, range) = Table::parse(TABLE).unwrap().step(2, 0, Edit::DeleteColumn);
+        assert_eq!(lines, ["| Status |", "| :----: |", "|  done  |", "| moving |"]);
+        assert_eq!(range, 3..7);
+        let (lines, _, _) = Table::parse(TABLE).unwrap().step(0, 0, Edit::Align(Align::Right));
+        assert_eq!(lines[1], "| ---: | :----: |");
+        let only = Table::parse(&["| a |", "|---|"]).unwrap().step(0, 0, Edit::DeleteColumn).0;
+        assert_eq!(only, ["| a   |", "| --- |"]);
     }
 
     #[test]

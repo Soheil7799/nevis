@@ -141,6 +141,14 @@ pub struct Command {
 /// What the palette calls the commands the sheet lists in pairs ("Next / previous tab" runs
 /// the next tab), and the other half of each pair.
 const HALVES: &[(&str, &str)] = &[("win.next-tab", "Next tab"), ("win.move-tab-left", "Move tab left"), ("win.tab-1", "First tab")];
+/// Commands only the palette offers: too many for the sheet, and without keys.
+const PALETTE_ONLY: &[Row] = &[
+    row("Table: add a column", "win.table-add-column", ""),
+    row("Table: delete the column", "win.table-delete-column", ""),
+    row("Table: align the column left", "win.table-align-left", ""),
+    row("Table: center the column", "win.table-align-center", ""),
+    row("Table: align the column right", "win.table-align-right", ""),
+];
 const OTHER_HALVES: &[Row] = &[row("Previous tab", "win.prev-tab", ""), row("Move tab right", "win.move-tab-right", ""), row("Last tab", "win.tab-9", "")];
 
 /// Every command with an action, in the cheat sheet's order, with its keys (`also` aside:
@@ -150,6 +158,7 @@ pub fn commands(app: &gtk::Application) -> Vec<Command> {
         .chain(RIGHT)
         .flat_map(|(_, rows)| rows.iter())
         .chain(OTHER_HALVES)
+        .chain(PALETTE_ONLY)
         .filter(|row| !row.action.is_empty())
         .map(|row| {
             let what = HALVES.iter().find(|(action, _)| *action == row.action).map_or(row.what, |(_, what)| what);

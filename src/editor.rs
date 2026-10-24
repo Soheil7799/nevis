@@ -531,9 +531,9 @@ impl Editor {
             let plain = !state.intersects(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK);
             let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
             let how = match key {
-                gdk::Key::Tab if plain && !shift => Some(crate::tables::Move::Next),
-                gdk::Key::ISO_Left_Tab | gdk::Key::Tab if plain => Some(crate::tables::Move::Previous),
-                gdk::Key::Return | gdk::Key::KP_Enter if plain && !shift => Some(crate::tables::Move::NewRow),
+                gdk::Key::Tab if plain && !shift => Some(crate::tables::Edit::Next),
+                gdk::Key::ISO_Left_Tab | gdk::Key::Tab if plain => Some(crate::tables::Edit::Previous),
+                gdk::Key::Return | gdk::Key::KP_Enter if plain && !shift => Some(crate::tables::Edit::NewRow),
                 _ => None,
             };
             if how.is_some_and(|how| editor.step_in_table(how)) {
@@ -864,7 +864,14 @@ impl Editor {
     /// False when Enter should just do what it always does.
     /// Tab, Shift+Tab or Enter in a Markdown table: its columns lined up, and the cursor's
     /// next cell selected (to type over). False when the cursor isn't in a table.
-    fn step_in_table(&self, how: crate::tables::Move) -> bool {
+    /// A table command (palette): done on the cursor's cell, or a word that it needs one.
+    pub fn table_command(&self, edit: crate::tables::Edit) {
+        if !self.step_in_table(edit) {
+            self.toast("Put the cursor in a table first", 1800);
+        }
+    }
+
+    fn step_in_table(&self, how: crate::tables::Edit) -> bool {
         if !self.styler.is_enabled() || self.is_reading() {
             return false;
         }
