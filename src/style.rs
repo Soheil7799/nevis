@@ -317,7 +317,22 @@ impl Styler {
         let (panels, code, chips) = match &*self.styled.borrow() {
             Some((text, spans)) if self.enabled.get() => {
                 let quotes = if self.live.get() { panels(text, spans) } else { Vec::new() };
-                (quotes, spans.of(Kind::CodeBlock).to_vec(), chips(spans, &colors))
+                let mut code = spans.of(Kind::CodeBlock).to_vec();
+                // In Live Preview a block's box holds its code, its fence lines outside it (with
+                // their numbers, beside line numbers, instead of blank rows in the box).
+                if self.live.get() {
+                    let fences = fences(text, spans, usize::MAX..=usize::MAX);
+                    for block in &mut code {
+                        if let Some(open) = fences.iter().find(|fence| fence.start == block.start) {
+                            block.start = open.end;
+                        }
+                        if let Some(close) = fences.iter().find(|fence| fence.start > block.start && fence.start <= block.end) {
+                            block.end = close.start.saturating_sub(1);
+                        }
+                    }
+                    code.retain(|block| block.start < block.end);
+                }
+                (quotes, code, chips(spans, &colors))
             }
             _ => (Vec::new(), Vec::new(), Vec::new()),
         };
