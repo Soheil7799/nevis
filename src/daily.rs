@@ -24,8 +24,13 @@ pub fn path(date: (i32, u32, u32), obsidian: Option<&str>, subfolders: &[&str]) 
     }
 }
 
-/// The date written in a moment.js-style `format` ("YYYY-MM-DD", "DD.MM.YY", "[Day] D"), or
-/// `None` when it has words nevis doesn't write (weekday and month names).
+const MONTHS: [&str; 12] =
+    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WEEKDAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/// The date written in a moment.js-style `format` ("YYYY-MM-DD", "DD.MM.YY", "[Day] D",
+/// "dddd D MMMM": English names, as moment.js writes them by default), or `None` when it has
+/// something else nevis doesn't write.
 pub fn written(format: &str, (year, month, day): (i32, u32, u32)) -> Option<String> {
     let mut out = String::new();
     let mut chars = format.chars().peekable();
@@ -50,6 +55,13 @@ pub fn written(format: &str, (year, month, day): (i32, u32, u32)) -> Option<Stri
             ('M', 2) => out.push_str(&format!("{month:02}")),
             ('D', 1) => out.push_str(&day.to_string()),
             ('D', 2) => out.push_str(&format!("{day:02}")),
+            ('M', 3) => out.push_str(&MONTHS.get(month as usize - 1)?[..3]),
+            ('M', 4) => out.push_str(MONTHS.get(month as usize - 1)?),
+            ('d', 3 | 4) => {
+                let date = gtk::glib::DateTime::from_local(year, month as i32, day as i32, 12, 0, 0.0).ok()?;
+                let name = WEEKDAYS[date.day_of_week() as usize - 1];
+                out.push_str(if run == 3 { &name[..3] } else { name });
+            }
             _ => return None,
         }
     }
@@ -75,6 +87,12 @@ pub fn setting(json: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn month_and_weekday_names_are_written_in_english() {
+        assert_eq!(written("dddd D MMMM YYYY", (2026, 10, 24)).as_deref(), Some("Saturday 24 October 2026"));
+        assert_eq!(written("ddd, MMM D", (2026, 1, 5)).as_deref(), Some("Mon, Jan 5"));
+    }
 
     const DAY: (i32, u32, u32) = (2026, 10, 8);
 

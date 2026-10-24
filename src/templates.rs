@@ -1,5 +1,6 @@
-//! New notes from templates: the notes in a folder window's templates folder, their
-//! `{{title}}`, `{{date}}` and `{{time}}` filled in as Obsidian's Templates plugin does.
+//! New notes from templates: the notes in a folder window's templates folder (and its
+//! subfolders), their `{{title}}`, `{{date}}` and `{{time}}` filled in as Obsidian's Templates
+//! plugin does; `{{cursor}}` (left for the window) says where the typing starts.
 
 use crate::daily;
 

@@ -1065,24 +1065,25 @@ impl Window {
             .map(|(bytes, _)| String::from_utf8_lossy(&bytes).into_owned());
         let subfolders = child_names(&root);
         let subfolders: Vec<&str> = subfolders.iter().map(String::as_str).collect();
-        let templates: Vec<gio::File> = crate::templates::folder(obsidian.as_deref(), &subfolders)
-            .map(|folder| root.resolve_relative_path(folder))
+        let templates_root = crate::templates::folder(obsidian.as_deref(), &subfolders).map(|folder| root.resolve_relative_path(folder));
+        let templates: Vec<gio::File> = templates_root
+            .clone()
             .map(|folder| {
-                let mut names = child_names(&folder);
-                names.retain(|name| listing::is_note(name));
-                names.sort_by_key(|name| name.to_lowercase());
-                names.iter().map(|name| folder.child(name)).collect()
+                let mut templates = notes_under(&folder, 3);
+                templates.sort_by_key(|file| folder.relative_path(file).map(|p| p.to_string_lossy().to_lowercase()));
+                templates
             })
             .unwrap_or_default();
-        if templates.is_empty() {
+        let Some(templates_root) = templates_root.filter(|_| !templates.is_empty()) else {
             return alert(&self.window, "No templates yet", "Put notes in a folder called templates (or the one Obsidian's Templates settings name), then try again.");
-        }
+        };
         let commands = templates
             .iter()
             .filter_map(|template| {
                 let path = template.path()?;
-                let name = template.basename()?.to_string_lossy().into_owned();
-                let what = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
+                // In a subfolder of the templates folder: "Work/Meeting".
+                let name = templates_root.relative_path(template)?.to_string_lossy().into_owned();
+                let what = name.strip_suffix(".md").unwrap_or(&name).to_owned();
                 let action = gio::Action::print_detailed_name("win.note-from-template", Some(&path.to_string_lossy().to_variant()));
                 Some(crate::help::Command { what, action: action.to_string(), keys: String::new() })
             })
@@ -1198,6 +1199,19 @@ impl Window {
                     let time = now.as_ref().map_or((0, 0), |now| (now.hour() as u32, now.minute() as u32));
                     crate::templates::fill(&String::from_utf8_lossy(&bytes), &title, date, time)
                 });
+                // {{cursor}}: where the typing starts (as a line and a column).
+                let (text, cursor) = match text {
+                    Some(text) => match text.find("{{cursor}}") {
+                        Some(at) => {
+                            let before = &text[..at];
+                            let line = before.matches('\n').count() as u32;
+                            let column = before.rsplit('\n').next().map_or(0, |last| last.chars().count()) as u32;
+                            (Some(text.replacen("{{cursor}}", "", 1)), Some((line, column)))
+                        }
+                        None => (Some(text), None),
+                    },
+                    None => (None, None),
+                };
                 match file.create(gio::FileCreateFlags::NONE, none) {
                     Ok(stream) => {
                         if let Some(text) = &text {
@@ -1205,7 +1219,11 @@ impl Window {
                         }
                         let _ = stream.close(none);
                         vault::forget();
-                        this.open(file, Some(OnLoad::Edit), How::NewTab);
+                        let then = match cursor {
+                            Some((line, column)) => OnLoad::Restore { text: None, line, column, reading: false, side_by_side: false },
+                            None => OnLoad::Edit,
+                        };
+                        this.open(file, Some(then), How::NewTab);
                     }
                     Err(err) => alert(&this.window, "Could not create the note", err.message()),
                 }
@@ -1681,6 +1699,27 @@ fn vault_of(file: &gio::File, window: Option<&std::path::Path>) -> Option<(PathB
 }
 
 /// The names in `folder`.
+/// The notes in `folder` and its subfolders, `depth` levels down at most.
+fn notes_under(folder: &gio::File, depth: usize) -> Vec<gio::File> {
+    let none = None::<&gio::Cancellable>;
+    let Ok(children) = folder.enumerate_children("standard::name,standard::type", gio::FileQueryInfoFlags::NONE, none) else {
+        return Vec::new();
+    };
+    let mut notes = Vec::new();
+    for info in children.flatten() {
+        let name = info.name();
+        let child = folder.child(&name);
+        if info.file_type() == gio::FileType::Directory {
+            if depth > 0 && !name.to_string_lossy().starts_with('.') {
+                notes.extend(notes_under(&child, depth - 1));
+            }
+        } else if listing::is_note(&name.to_string_lossy()) {
+            notes.push(child);
+        }
+    }
+    notes
+}
+
 fn child_names(folder: &gio::File) -> Vec<String> {
     let Ok(children) = folder.enumerate_children("standard::name", gio::FileQueryInfoFlags::NONE, None::<&gio::Cancellable>)
     else {
