@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::rc::Rc;
 
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd};
@@ -23,6 +24,8 @@ pub enum Target {
     Tag(String),
     /// A foldable callout's header: clicking shows or hides the body this tag hides.
     Fold(gtk::TextTag),
+    /// A code block: clicking copies its code, as written in the note.
+    Copy(Rc<str>),
 }
 
 /// Markdown features nevis understands, shared by the read view and the source styling.
@@ -295,6 +298,8 @@ struct Renderer<'m> {
     /// List indents by (where text starts, depth, hanging width, right-to-left).
     indents: HashMap<(i32, usize, i32, bool), gtk::TextTag>,
     code_start: Option<i32>,
+    /// The code block's code so far, as written in the note (what a click on it copies).
+    code_text: Option<String>,
     code_language: Option<String>,
     code: Vec<CodeBlock>,
     /// The heading being written: where it starts and its text so far.
@@ -358,6 +363,7 @@ impl<'m> Renderer<'m> {
             items: Vec::new(),
             indents: HashMap::new(),
             code_start: None,
+            code_text: None,
             code_language: None,
             code: Vec::new(),
             heading: None,
@@ -515,6 +521,7 @@ impl<'m> Renderer<'m> {
                     return;
                 }
                 self.code_start = Some(self.buffer.end_iter().offset());
+                self.code_text = Some(String::new());
                 self.block.push(self.styles.code_block.clone());
             }
             Tag::HtmlBlock => self.end_line(),
@@ -638,12 +645,21 @@ impl<'m> Renderer<'m> {
                         return self.figure(sequence::picture(&diagram, self.text).upcast());
                     }
                     self.code_start = Some(self.buffer.end_iter().offset());
+                    self.code_text = Some(String::new());
                     self.block.push(self.styles.code_block.clone());
                     self.text(&source);
                 }
                 self.end_line();
                 self.block.pop();
                 if let Some(start) = self.code_start.take() {
+                    // A click on the block copies its code (the fences left out), as the note has
+                    // it: not what is shown (a list item's bullet, written into its first line).
+                    let code = self.code_text.take().unwrap_or_default();
+                    let (from, to) = (self.buffer.iter_at_offset(start), self.buffer.end_iter());
+                    let copy = gtk::TextTag::new(None);
+                    self.buffer.tag_table().add(&copy);
+                    self.buffer.apply_tag(&copy, &from, &to);
+                    self.targets.push((copy, Target::Copy(code.strip_suffix('\n').unwrap_or(&code).into())));
                     let first = self.buffer.create_mark(None, &self.buffer.iter_at_offset(start), true);
                     let last = self.buffer.create_mark(None, &self.buffer.end_iter(), true);
                     let look = Look::Box(rgba(theme::colors().code_background, 1.0));
@@ -724,6 +740,7 @@ impl<'m> Renderer<'m> {
         // A task with its own mark (`[?]`, `[-]`): the parser leaves it as text, often split at
         // the brackets, so it's read from the note.
         if self.pending_bullet
+            && self.code_start.is_none()
             && let Some(&[b'[', mark, b']', b' ']) = source.as_bytes().get(range.start..range.start + 4)
             && !matches!(mark, b' ' | b'x' | b'X')
             && mark.is_ascii_graphic()
@@ -948,6 +965,9 @@ impl<'m> Renderer<'m> {
             alt.push_str(text);
             return;
         }
+        if let Some(code) = &mut self.code_text {
+            code.push_str(text);
+        }
         if let Some(cell) = self.cell() {
             cell.markup.push_str(&glib::markup_escape_text(text));
             cell.plain.push_str(text);
@@ -1079,7 +1099,10 @@ impl<'m> Renderer<'m> {
         };
         self.hang(&marker);
         self.inline.push(self.styles.dim.clone());
+        // Shown, not part of a code block it may start.
+        let code = self.code_text.take();
         self.text(&marker);
+        self.code_text = code;
         self.inline.pop();
     }
 

@@ -82,6 +82,7 @@ const RIGHT: &[(&str, &[Row])] = &[
         row("Tick a checkbox", "", "Click"),
         row("Search for a #tag", "", "Click"),
         row("Fold or unfold a callout", "", "Click its title"),
+        row("Copy a code block", "", "Click"),
         row("Edit the source", "", "Double-click"),
     ]),
 ];
