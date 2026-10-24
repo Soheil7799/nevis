@@ -501,6 +501,18 @@ impl Editor {
                     return glib::Propagation::Stop;
                 }
             }
+            // In a table, Tab and Shift+Tab go from cell to cell and Enter starts a row.
+            let plain = !state.intersects(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK);
+            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+            let how = match key {
+                gdk::Key::Tab if plain && !shift => Some(crate::tables::Move::Next),
+                gdk::Key::ISO_Left_Tab | gdk::Key::Tab if plain => Some(crate::tables::Move::Previous),
+                gdk::Key::Return | gdk::Key::KP_Enter if plain && !shift => Some(crate::tables::Move::NewRow),
+                _ => None,
+            };
+            if how.is_some_and(|how| editor.step_in_table(how)) {
+                return glib::Propagation::Stop;
+            }
             if !matches!(key, gdk::Key::Return | gdk::Key::KP_Enter) || state.intersects(modifiers) {
                 return glib::Propagation::Proceed;
             }
@@ -717,6 +729,45 @@ impl Editor {
 
     /// Enter on a Markdown list item or quote: continues it, or ends it when it is empty.
     /// False when Enter should just do what it always does.
+    /// Tab, Shift+Tab or Enter in a Markdown table: its columns lined up, and the cursor's
+    /// next cell selected (to type over). False when the cursor isn't in a table.
+    fn step_in_table(&self, how: crate::tables::Move) -> bool {
+        if !self.styler.is_enabled() || self.is_reading() {
+            return false;
+        }
+        let cursor = self.buffer.iter_at_mark(&self.buffer.get_insert());
+        if self.styler.in_code(&cursor) {
+            return false;
+        }
+        let text = self.text();
+        let lines: Vec<&str> = text.split('\n').collect();
+        let line = cursor.line() as usize;
+        let Some((first, last)) = crate::tables::around(&lines, line) else { return false };
+        let Some(table) = crate::tables::Table::parse(&lines[first..=last]) else { return false };
+        let cell = crate::tables::cell_at(lines[line], cursor.line_offset() as usize);
+        let (written, at, range) = table.step(line - first, cell, how);
+        let (Some(mut start), Some(mut end)) =
+            (self.buffer.iter_at_line(first as i32), self.buffer.iter_at_line(last as i32))
+        else {
+            return false;
+        };
+        if !end.ends_line() {
+            end.forward_to_line_end();
+        }
+        self.buffer.begin_user_action();
+        self.buffer.delete(&mut start, &mut end);
+        self.buffer.insert(&mut start, &written.join("\n"));
+        self.buffer.end_user_action();
+        let row = (first + at) as i32;
+        if let (Some(from), Some(to)) =
+            (self.buffer.iter_at_line_offset(row, range.start as i32), self.buffer.iter_at_line_offset(row, range.end as i32))
+        {
+            self.buffer.select_range(&to, &from);
+        }
+        self.view.scroll_mark_onscreen(&self.buffer.get_insert());
+        true
+    }
+
     fn continue_list(&self) -> bool {
         if !settings::get().continue_lists || !self.styler.is_enabled() || self.buffer.has_selection() {
             return false;

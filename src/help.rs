@@ -73,6 +73,7 @@ const RIGHT: &[(&str, &[Row])] = &[
         row("Make a link (or paste an address over words)", "win.link", ""),
         row("Paste a screenshot (saved in attachments/)", "", "Ctrl+V"),
         row("Complete [[links]], #tags, > [!callouts]", "", "Enter / Tab"),
+        row("Next / previous table cell, new row", "", "Tab / Shift+Tab / Enter"),
     ]),
     ("Editing", &[
         row("Undo / redo", "", "Ctrl+Z / Shift+Ctrl+Z"),

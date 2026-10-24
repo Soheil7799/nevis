@@ -6,7 +6,8 @@
 //! - `NEVIS_ACTIONS=win.reading,win.switch-to:/path/a.md`: actions to run first (for the
 //!   picture); `:` gives an action its string argument.
 //! - `NEVIS_TYPE=text`: then type it at the cursor, as a user would (replacing the selection;
-//!   in a field, a final newline presses Enter).
+//!   in a field, a final newline presses Enter). In a text view, `{Tab}`, `{S-Tab}`, `{Enter}`
+//!   and `{End}` press those keys, through the view's own key handlers.
 //! - `NEVIS_PASTE_IMAGE=file.png`: then paste that image at the cursor (instead of what the
 //!   clipboard holds, which test runs share with the desktop).
 //! - `NEVIS_WAIT=ms`: how long to wait before typing and the picture (default 500).
@@ -23,7 +24,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use gtk::{glib, prelude::*};
+use gtk::{gdk, glib, prelude::*};
 
 static START: OnceLock<Instant> = OnceLock::new();
 
@@ -205,8 +206,21 @@ fn type_text(window: &gtk::ApplicationWindow) -> bool {
     let Ok(text) = std::env::var("NEVIS_TYPE") else { return false };
     let focus = RootExt::focus(window);
     if let Some(view) = focus.clone().and_downcast::<gtk::TextView>() {
-        view.buffer().delete_selection(true, true);
-        view.buffer().insert_interactive_at_cursor(&text, true);
+        let mut rest = text.as_str();
+        while !rest.is_empty() {
+            let (typed, key) = match rest.find('{').zip(rest.find('}')) {
+                Some((open, close)) if open < close => (&rest[..open], Some(&rest[open + 1..close])),
+                _ => (rest, None),
+            };
+            if !typed.is_empty() {
+                view.buffer().delete_selection(true, true);
+                view.buffer().insert_interactive_at_cursor(typed, true);
+            }
+            if let Some(key) = key {
+                press(&view, key);
+            }
+            rest = &rest[typed.len() + key.map_or(0, |key| key.len() + 2)..];
+        }
     } else if let Some(field) = focus.and_downcast::<gtk::Editable>() {
         let (text, enter) = match text.strip_suffix('\n') {
             Some(text) => (text, true),
@@ -225,6 +239,30 @@ fn type_text(window: &gtk::ApplicationWindow) -> bool {
         return false;
     }
     true
+}
+
+/// Presses `key` ("Tab", "S-Tab", "Enter", "End") in `view`: its key controllers first, as
+/// GTK would, then the view's own binding for moving to the end.
+fn press(view: &gtk::TextView, key: &str) {
+    let (keyval, state) = match key {
+        "Tab" => (gdk::Key::Tab, gdk::ModifierType::empty()),
+        "S-Tab" => (gdk::Key::ISO_Left_Tab, gdk::ModifierType::SHIFT_MASK),
+        "Enter" => (gdk::Key::Return, gdk::ModifierType::empty()),
+        "End" => {
+            let buffer = view.buffer();
+            buffer.place_cursor(&buffer.end_iter());
+            return;
+        }
+        _ => return eprintln!("nevis: NEVIS_TYPE: no key {key}"),
+    };
+    let controllers = view.observe_controllers();
+    for controller in (0..controllers.n_items()).filter_map(|i| controllers.item(i).and_downcast::<gtk::EventControllerKey>()) {
+        if controller.emit_by_name::<bool>("key-pressed", &[&glib::translate::IntoGlib::into_glib(keyval), &0u32, &state]) {
+            return;
+        }
+    }
+    let character = if keyval == gdk::Key::Return { "\n" } else { "\t" };
+    view.buffer().insert_interactive_at_cursor(character, true);
 }
 
 fn snapshot(window: &gtk::ApplicationWindow, path: &std::ffi::OsStr) -> Result<(), String> {

@@ -22,6 +22,8 @@ pub enum Kind {
     CodeBlock,
     Frontmatter,
     Html,
+    /// A table as written: in the code font, so that its columns line up.
+    Table,
     H1,
     H2,
     H3,
@@ -50,6 +52,7 @@ const ALL: [Kind; KINDS] = [
     Kind::CodeBlock,
     Kind::Frontmatter,
     Kind::Html,
+    Kind::Table,
     Kind::H1,
     Kind::H2,
     Kind::H3,
@@ -548,6 +551,7 @@ fn tag_for(kind: Kind) -> gtk::TextTag {
             .build(),
         Kind::Frontmatter | Kind::Html => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().dim.to_hex()).build(),
         Kind::Url => gtk::TextTag::builder().foreground(theme::colors().dim.to_hex()).build(),
+        Kind::Table => gtk::TextTag::builder().family(theme::fonts::MONO).build(),
         Kind::H1 => heading(1.6),
         Kind::H2 => heading(1.3),
         Kind::H3 => heading(1.12),
@@ -1042,6 +1046,7 @@ pub fn spans(source: &str) -> Spans {
             Event::Start(Tag::Table(_)) => {
                 out.keep(range.clone());
                 out.block(source, range.clone(), Block::Table);
+                out.push(Kind::Table, without_newline(source, range.clone()));
                 table(source, range, &mut out);
             }
             Event::Start(Tag::TableHead) => out.push(Kind::Strong, without_newline(source, range)),
