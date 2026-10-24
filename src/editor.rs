@@ -1335,6 +1335,12 @@ impl Editor {
 
     /// "Copied", over the bottom of the tab for a moment (and said, to a screen reader).
     fn show_copied(&self) {
+        self.toast("Copied", 1200);
+    }
+
+    /// `text` over the bottom of the tab for `ms` (and said, to a screen reader); a toast
+    /// still showing takes the new text instead of another stacking up.
+    fn toast(&self, text: &str, ms: u64) {
         let label = match self.copied.take() {
             Some((label, going)) => {
                 going.remove();
@@ -1342,7 +1348,6 @@ impl Editor {
             }
             None => {
                 let label = gtk::Label::builder()
-                    .label("Copied")
                     .halign(gtk::Align::Center)
                     .valign(gtk::Align::End)
                     .margin_bottom(24)
@@ -1353,10 +1358,11 @@ impl Editor {
                 label
             }
         };
-        self.reader.announce("Copied", gtk::AccessibleAnnouncementPriority::Medium);
+        label.set_label(text);
+        self.reader.announce(text, gtk::AccessibleAnnouncementPriority::Medium);
         let me = self.me.clone();
         let shown = label.clone();
-        let going = glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+        let going = glib::timeout_add_local_once(Duration::from_millis(ms), move || {
             if let Some(editor) = me.upgrade() {
                 editor.copied.take();
                 editor.layer.remove_overlay(&shown);
@@ -1780,6 +1786,43 @@ impl Editor {
         }
     }
 
+    /// The note's earlier versions (see `history`), for the palette: when each was saved
+    /// last and how long it is, newest first.
+    pub fn versions(&self) -> Vec<crate::help::Command> {
+        let Some(path) = self.location().and_then(|location| location.path()) else { return Vec::new() };
+        crate::history::versions(&path)
+            .into_iter()
+            .filter_map(|(version, started)| {
+                let saved = std::fs::metadata(&version)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(started, |since| since.as_millis() as i64);
+                let text = std::fs::read_to_string(&version).ok()?;
+                let what = format!("{} · {}", crate::history::when(saved), crate::words::summary(&text));
+                let target = version.to_string_lossy().to_variant();
+                let action = gio::Action::print_detailed_name("win.restore-version", Some(&target)).to_string();
+                Some(crate::help::Command { what, action, keys: String::new() })
+            })
+            .collect()
+    }
+
+    /// The text becomes that of an earlier version (`version`, one of `versions`), as one
+    /// change Ctrl+Z takes back; saved when the note is.
+    pub fn restore_version(&self, version: &std::path::Path) {
+        let Ok(text) = std::fs::read_to_string(version) else { return };
+        if self.is_reading() {
+            self.set_reading(false);
+        }
+        self.buffer.begin_user_action();
+        let (mut start, mut end) = (self.buffer.start_iter(), self.buffer.end_iter());
+        self.buffer.delete(&mut start, &mut end);
+        self.buffer.insert(&mut start, &text);
+        self.buffer.end_user_action();
+        self.buffer.place_cursor(&self.buffer.start_iter());
+        self.toast("Earlier version back · Ctrl+Z undoes it", 2600);
+    }
+
     /// The file's name, or what an unsaved note would be named.
     fn print_name(&self) -> String {
         self.location()
@@ -1921,6 +1964,9 @@ impl Editor {
         };
         self.saving.set(false);
         if saved {
+            if let Some(path) = self.location().and_then(|location| location.path()) {
+                crate::history::keep(&path, &self.text());
+            }
             self.kept_mine.set(false);
             self.buffer.set_modified(false);
             *self.note.borrow_mut() = None;

@@ -409,6 +409,20 @@ impl Window {
         self.on_current("print", |_, e| spawn(e.print(None)));
         self.on_current("export-pdf", |_, e| spawn(e.export_pdf()));
         self.on_current("export-html", |_, e| spawn(e.export_html()));
+        self.on_current("history", |w, e| {
+            let versions = e.versions();
+            if versions.is_empty() {
+                return alert(&w.window, "No earlier versions yet", "nevis keeps a version each time a note is saved (one every ten minutes at most).");
+            }
+            if let Some(palette) = w.palette_popup() {
+                palette.show(versions, "Go back to the version from…");
+            }
+        });
+        self.with_path("restore-version", |w, version| {
+            if let (Some(editor), Some(path)) = (w.current(), version.path()) {
+                editor.restore_version(&path);
+            }
+        });
         self.on_current("find", |_, e| {
             e.set_reading(false);
             e.find_bar().show(false);

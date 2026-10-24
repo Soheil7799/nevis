@@ -33,6 +33,7 @@ const LEFT: &[(&str, &[Row])] = &[
         row("Print", "win.print", ""),
         row("Close tab", "win.close", ""),
         row("Reopen closed tab", "win.reopen-tab", ""),
+        row("Note history: go back to an earlier version", "win.history", ""),
         row("Close window", "win.close-window", ""),
         row("Quit, keeping every tab", "app.quit", ""),
     ]),

@@ -14,6 +14,7 @@ mod flowchart;
 mod gantt;
 mod gtkcolors;
 mod help;
+mod history;
 mod html;
 mod links;
 mod lists;
