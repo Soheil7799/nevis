@@ -18,6 +18,9 @@ pub struct Table {
     aligns: Vec<Align>,
 }
 
+/// Where `Table::step` puts the cursor when it leaves the table: on a new line under it.
+pub const AFTER: usize = usize::MAX;
+
 /// What is done from a cell: Tab, Shift+Tab, Enter, or a table command.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Edit {
@@ -155,12 +158,18 @@ impl Table {
 
     /// The table after `how` from the cell at `line` (of its lines, the divider counted) and
     /// `cell`: its lines, and where the cursor goes, as a line and a character range in it
-    /// (the cell's text, to type over).
+    /// (the cell's text, to type over); the line is `AFTER` when Enter on an empty last row
+    /// takes it out of the table (that row gone), onto a line of its own under it.
     pub fn step(mut self, line: usize, cell: usize, how: Edit) -> (Vec<String>, usize, std::ops::Range<usize>) {
         let columns = self.aligns.len();
-        // Rows of `self.rows`: the header is 0, the divider has none.
-        let row = if line == 0 { 0 } else { line.saturating_sub(1).max(1).min(self.rows.len()) };
+        // Rows of `self.rows`: the header is 0 (the divider counts as it), the others follow.
+        let row = line.saturating_sub(1).min(self.rows.len() - 1);
         let cell = cell.min(columns - 1);
+        let last = row > 0 && row + 1 == self.rows.len();
+        if how == Edit::NewRow && last && self.rows[row].iter().all(String::is_empty) {
+            self.rows.pop();
+            return (self.lines(), AFTER, 0..0);
+        }
         let (row, cell) = match how {
             Edit::Next if cell + 1 < columns => (row, cell + 1),
             Edit::Next | Edit::NewRow => {
@@ -271,6 +280,23 @@ mod tests {
         assert_eq!(lines[1], "| ---: | :----: |");
         let only = Table::parse(&["| a |", "|---|"]).unwrap().step(0, 0, Edit::DeleteColumn).0;
         assert_eq!(only, ["| a   |", "| --- |"]);
+    }
+
+    #[test]
+    fn a_table_with_no_rows_yet_gets_its_first_from_the_divider() {
+        let head = ["| a | b |", "|---|---|"];
+        let (lines, line, range) = Table::parse(&head).unwrap().step(1, 0, Edit::NewRow);
+        assert_eq!((lines.len(), line, range), (3, 2, 2..2));
+        let (lines, line, _) = Table::parse(&head).unwrap().step(1, 1, Edit::Next);
+        assert_eq!((lines.len(), line), (3, 2));
+    }
+
+    #[test]
+    fn enter_on_an_empty_last_row_leaves_the_table() {
+        let lines = ["| a | b |", "|---|---|", "| 1 | 2 |", "|   |   |"];
+        let (written, line, _) = Table::parse(&lines).unwrap().step(3, 0, Edit::NewRow);
+        assert_eq!(written.len(), 3);
+        assert_eq!(line, AFTER);
     }
 
     #[test]

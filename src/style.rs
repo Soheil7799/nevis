@@ -1046,7 +1046,9 @@ pub fn spans(source: &str) -> Spans {
             Event::Start(Tag::Table(_)) => {
                 out.keep(range.clone());
                 out.block(source, range.clone(), Block::Table);
-                out.push(Kind::Table, without_newline(source, range.clone()));
+                // From its first line's start: an indent before it is in the code font too.
+                let line_start = source[..range.start].rfind('\n').map_or(0, |i| i + 1);
+                out.push(Kind::Table, without_newline(source, line_start..range.end));
                 table(source, range, &mut out);
             }
             Event::Start(Tag::TableHead) => out.push(Kind::Strong, without_newline(source, range)),

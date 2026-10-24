@@ -886,6 +886,9 @@ impl Editor {
         let Some(table) = crate::tables::Table::parse(&lines[first..=last]) else { return false };
         let cell = crate::tables::cell_at(lines[line], cursor.line_offset() as usize);
         let (written, at, range) = table.step(line - first, cell, how);
+        // A table in a list item keeps its indent.
+        let indent: String = lines[first].chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+        let written: Vec<String> = written.iter().map(|line| format!("{indent}{line}")).collect();
         let (Some(mut start), Some(mut end)) =
             (self.buffer.iter_at_line(first as i32), self.buffer.iter_at_line(last as i32))
         else {
@@ -894,15 +897,24 @@ impl Editor {
         if !end.ends_line() {
             end.forward_to_line_end();
         }
+        // Out of the table (Enter on an empty last row): onto a new line under it.
+        let leaving = at == crate::tables::AFTER;
+        let mut text = written.join("\n");
+        if leaving {
+            text.push_str(&format!("\n{indent}"));
+        }
         self.buffer.begin_user_action();
         self.buffer.delete(&mut start, &mut end);
-        self.buffer.insert(&mut start, &written.join("\n"));
+        self.buffer.insert(&mut start, &text);
         self.buffer.end_user_action();
-        let row = (first + at) as i32;
-        if let (Some(from), Some(to)) =
-            (self.buffer.iter_at_line_offset(row, range.start as i32), self.buffer.iter_at_line_offset(row, range.end as i32))
-        {
-            self.buffer.select_range(&to, &from);
+        if leaving {
+            self.buffer.place_cursor(&start);
+        } else {
+            let (row, shift) = ((first + at) as i32, indent.chars().count() as i32);
+            let (from, to) = (range.start as i32 + shift, range.end as i32 + shift);
+            if let (Some(from), Some(to)) = (self.buffer.iter_at_line_offset(row, from), self.buffer.iter_at_line_offset(row, to)) {
+                self.buffer.select_range(&to, &from);
+            }
         }
         self.view.scroll_mark_onscreen(&self.buffer.get_insert());
         true
