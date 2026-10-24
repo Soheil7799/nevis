@@ -377,20 +377,20 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-help-keys {{ color: {dim}; font-size: 0.9em; font-feature-settings: \"tnum\"; }}
          /* The tab bar and the sidebar are the window's frame, in the surface colour; the tab in
             front is cut from the page, in its colour, so it reads as the page's own. */
-         .nevis-tabbar {{ background: {surface}; padding: 6px 8px 0 8px; }}
+         .nevis-tabbar {{ background: {surface}; padding: 3px 8px 0 8px; }}
          .nevis-tab {{ padding: 0 4px 0 12px; margin-right: 2px; border-radius: 8px 8px 0 0; color: {dim};
              transition: color 120ms ease, background-color 120ms ease; }}
-         .nevis-tab > label {{ padding: 7px 0; }}
+         .nevis-tab > label {{ padding: 4px 0; }}
          .nevis-tab:hover {{ color: {text}; background-color: alpha({text}, 0.05); }}
          .nevis-tab.current {{ color: {text}; background-color: {background}; }}
          .nevis-tab.current > .nevis-tab-title {{ font-weight: 500; }}
          .nevis-tab > .nevis-tab-number {{ margin-right: 6px; color: {accent}; font-weight: 600; }}
-         .nevis-tab-close {{ min-width: 10px; padding: 0 6px; margin: 6px 0; color: transparent; border-radius: 999px;
+         .nevis-tab-close {{ min-width: 10px; padding: 0 6px; margin: 3px 0; color: transparent; border-radius: 999px;
              transition: color 120ms ease, background-color 120ms ease; }}
          .nevis-tab:hover > .nevis-tab-close, .nevis-tab.current > .nevis-tab-close {{ color: {dim}; }}
          .nevis-tab > .nevis-tab-close.unsaved {{ color: {accent}; font-size: 0.7em; }}
          .nevis-tab > .nevis-tab-close:hover {{ color: {text}; background-color: alpha({text}, 0.1); }}
-         .nevis-tab-new, .nevis-sidebar-new {{ margin: 4px 0 4px 6px; padding: 0 10px; color: {dim}; border-radius: 999px;
+         .nevis-tab-new, .nevis-sidebar-new {{ margin: 2px 0 2px 6px; padding: 0 10px; color: {dim}; border-radius: 999px;
              transition: color 120ms ease, background-color 120ms ease; }}
          .nevis-tab-new:hover, .nevis-sidebar-new:hover {{ color: {text}; background-color: alpha({text}, 0.08); }}
          /* No padding on the right: the list scrolls right up to the card's edge, so its
