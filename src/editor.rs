@@ -697,8 +697,12 @@ impl Editor {
 
     /// The source and the rendered view side by side (on), or the source alone (off).
     pub fn set_side_by_side(&self, on: bool) {
-        if on == self.is_split() {
+        if on == self.is_split() || (on && !self.styler.is_enabled() && self.location().is_some_and(|l| !is_markdown(&l))) {
             return;
+        }
+        // Either way the source shows, as far as the reading view's action is concerned.
+        if let Some(host) = self.host.upgrade() {
+            host.reading_changed(self, false);
         }
         if !on {
             let Some(split) = self.split.take() else { return };
@@ -1089,7 +1093,13 @@ impl Editor {
 
     /// Shows the rendered Markdown (true) or the source (false).
     pub fn set_reading(&self, on: bool) {
+        // Side by side, the source shows already (find, a double-click in the rendered half);
+        // the rendered view alone takes the place of both.
         if self.is_split() {
+            if !on {
+                self.view.grab_focus();
+                return;
+            }
             self.set_side_by_side(false);
         }
         if on && !self.rendered.get() {
