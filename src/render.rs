@@ -85,6 +85,8 @@ pub struct Rendered {
     pub code: Vec<CodeBlock>,
     /// Blocks drawn on panels, outer ones first, for the view to draw behind the text.
     pub panels: Vec<Panel>,
+    /// What the view draws over the text (tasks' boxes), as character ranges.
+    pub marks: Vec<(Range<usize>, crate::style::Mark)>,
 }
 
 /// A block drawn on a panel behind its text (by `paper::Paper`): from `start`'s line to
@@ -177,17 +179,25 @@ impl Styles {
             table.add(&tag);
             tag
         };
-        let heading = |scale: f64, above: i32| {
+        let heading = |scale: f64, above: i32, below: i32, dim: bool| {
+            let colors = theme::colors();
             add(gtk::TextTag::builder()
-                .weight(700)
+                .weight(650)
                 .scale(scale)
-                .foreground(theme::colors().heading.to_hex())
+                .foreground(if dim { colors.dim } else { colors.heading }.to_hex())
                 .pixels_above_lines(above)
-                .pixels_below_lines(6)
+                .pixels_below_lines(below)
                 .build())
         };
         Self {
-            headings: [heading(1.8, 18), heading(1.5, 16), heading(1.3, 12), heading(1.15, 10), heading(1.05, 8), heading(1.0, 8)],
+            headings: [
+                heading(1.6, 28, 8, false),
+                heading(1.3, 24, 6, false),
+                heading(1.12, 18, 4, false),
+                heading(1.0, 14, 4, false),
+                heading(1.0, 12, 4, true),
+                heading(0.9, 12, 4, true),
+            ],
             paragraph: add(gtk::TextTag::builder().pixels_below_lines(10).build()),
             strong: add(gtk::TextTag::builder().weight(700).build()),
             emphasis: add(gtk::TextTag::builder().style(pango::Style::Italic).build()),
@@ -263,6 +273,7 @@ struct Renderer<'m> {
     depth: u8,
     /// Blocks drawn on panels (see `Panel`), outer ones first, and those open now.
     panels: Vec<Panel>,
+    marks: Vec<(Range<usize>, crate::style::Mark)>,
     open: Vec<Open>,
     /// Where text starts, from both sides of the view: the margin, further in on panels.
     left: i32,
@@ -342,6 +353,7 @@ impl<'m> Renderer<'m> {
             drawn_to: 0,
             depth: 0,
             panels: Vec::new(),
+            marks: Vec::new(),
             open: Vec::new(),
             left: margin,
             origin: margin,
@@ -1117,10 +1129,20 @@ impl<'m> Renderer<'m> {
         self.pending_bullet = false;
         self.hang(if done { "☑ " } else { "☐ " });
         let colors = theme::colors();
-        let tag = gtk::TextTag::builder().foreground((if done { colors.accent } else { colors.dim }).to_hex()).build();
+        // Out of a table, the glyph only makes room for the box the view draws over it.
+        let drawn = self.table.is_none();
+        let tag = if drawn {
+            gtk::TextTag::builder().foreground_rgba(&gdk::RGBA::new(0.0, 0.0, 0.0, 0.001)).build()
+        } else {
+            gtk::TextTag::builder().foreground((if done { colors.accent } else { colors.dim }).to_hex()).build()
+        };
         self.buffer.tag_table().add(&tag);
         self.targets.push((tag.clone(), Target::Task(range)));
+        let at = self.buffer.end_iter().offset() as usize;
         self.styled(if done { "☑ " } else { "☐ " }, tag, "", "");
+        if drawn {
+            self.marks.push((at..at + 1, crate::style::Mark::Task(done)));
+        }
         if done {
             self.inline.push(self.styles.done.clone());
         }
@@ -1314,6 +1336,7 @@ impl<'m> Renderer<'m> {
             lines: self.lines,
             code: self.code,
             panels: self.panels,
+            marks: self.marks,
         }
     }
 
@@ -1592,14 +1615,8 @@ pub fn display_width(text: &str) -> usize {
 }
 
 fn table_widget(table: Table) -> gtk::Widget {
-    let grid = gtk::Grid::builder()
-        .column_spacing(18)
-        .row_spacing(6)
-        .margin_top(6)
-        .margin_bottom(6)
-        .margin_start(10)
-        .margin_end(10)
-        .build();
+    // No spacing: each cell pads itself, so the rules under the rows run unbroken.
+    let grid = gtk::Grid::builder().build();
     for (row, (header, cells)) in table.rows.iter().enumerate() {
         for (col, cell) in cells.iter().enumerate() {
             let rtl = pango::find_base_dir(&cell.plain) == pango::Direction::Rtl;
@@ -1611,7 +1628,7 @@ fn table_widget(table: Table) -> gtk::Widget {
                 _ if rtl => 1.0,
                 _ => 0.0,
             };
-            let markup = if *header { format!("<b>{}</b>", cell.markup) } else { cell.markup.clone() };
+            let markup = if *header { format!("<span weight=\"600\">{}</span>", cell.markup) } else { cell.markup.clone() };
             // Embedded widgets get their minimum width, so only long cells may wrap.
             let long = display_width(&cell.plain) > 30;
             let label = gtk::Label::builder()
@@ -1620,7 +1637,11 @@ fn table_widget(table: Table) -> gtk::Widget {
                 .wrap(long)
                 .width_chars(if long { 30 } else { -1 })
                 .xalign(xalign)
+                .css_classes([if *header { "nevis-table-head" } else { "nevis-table-cell" }])
                 .build();
+            if row + 1 == table.rows.len() {
+                label.add_css_class("last");
+            }
             grid.attach(&label, col as i32, row as i32, 1, 1);
         }
     }

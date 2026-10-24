@@ -94,6 +94,7 @@ pub struct Styler {
     /// last (what is hidden is worked out from them), the lines being edited when it was, and
     /// whether it waits (typing through an input method, dragging a selection).
     hide: gtk::TextTag,
+    fence: gtk::TextTag,
     /// Live Preview draws on this view (dots, checkboxes, rules and titles over the text,
     /// quote bars and callout boxes behind it); the tag keeps the text under a drawing unseen.
     paper: RefCell<Option<Paper>>,
@@ -118,6 +119,9 @@ impl Styler {
             .collect();
         let hide = gtk::TextTag::builder().invisible(true).build();
         table.add(&hide);
+        // A hidden fence's line, nearly no height: its block shows as just the code.
+        let fence = gtk::TextTag::builder().size_points(1.0).pixels_above_lines(0).build();
+        table.add(&fence);
         // Not quite 0: Pango takes an alpha of 0 as none given, and draws the text (or its
         // background) opaque. No background (a formula's code background would show round its
         // drawing).
@@ -127,6 +131,7 @@ impl Styler {
         let styler = Rc::new(Self {
             buffer: buffer.clone(),
             hide,
+            fence,
             paper: RefCell::new(None),
             clear,
             live: Cell::new(false),
@@ -179,14 +184,32 @@ impl Styler {
     /// Live Preview on or off: markup hidden except where the cursor is.
     pub fn set_live(&self, on: bool) {
         self.live.set(on);
+        self.mark_live();
         self.editing.set(None);
         self.update_panels();
+        self.rehide();
+    }
+
+    /// The line numbers were shown or hidden: fences shrink only without them.
+    pub fn numbers_changed(&self) {
         self.rehide();
     }
 
     /// Live Preview draws on `paper`, the view showing the buffer.
     pub fn draw_on(&self, paper: &Paper) {
         *self.paper.borrow_mut() = Some(paper.clone());
+        self.mark_live();
+    }
+
+    /// Live Preview sets prose in the body font, code in the code font (see `apply_font`).
+    fn mark_live(&self) {
+        if let Some(paper) = self.paper.borrow().as_ref() {
+            if self.is_live() {
+                paper.add_css_class("nevis-live");
+            } else {
+                paper.remove_css_class("nevis-live");
+            }
+        }
     }
 
     /// The cursor or the selection moved: the lines shown as written may change.
@@ -228,7 +251,9 @@ impl Styler {
         }
         let editing = self.editing_lines();
         self.editing.set(editing);
-        let (want, marks, blocks, rows) = match (&*self.styled.borrow(), editing) {
+        // Beside line numbers a fence keeps its height: its number would sit on the next one's.
+        let numbered = self.paper.borrow().as_ref().is_some_and(sourceview::prelude::ViewExt::shows_line_numbers);
+        let (want, fences, marks, blocks, rows) = match (&*self.styled.borrow(), editing) {
             (Some((text, spans)), Some((first, last))) if self.live.get() && self.enabled.get() => {
                 let (blocks, rows) = (blocks(text, spans, first..=last), pictures(text, spans, first..=last));
                 // Each block's and picture's source, for the paper to draw it from.
@@ -246,11 +271,13 @@ impl Styler {
                     })
                     .collect();
                 let rows = rows.into_iter().map(|(line, pictures)| (line, pictures.iter().map(source).collect())).collect();
-                (hidden(text, spans, first..=last), drawn(text, spans, first..=last), blocks, rows)
+                let fences = if numbered { Vec::new() } else { fences(text, spans, first..=last) };
+                (hidden(text, spans, first..=last), fences, drawn(text, spans, first..=last), blocks, rows)
             }
-            _ => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+            _ => (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         };
         self.retag(&self.hide, &want);
+        self.retag(&self.fence, &fences);
         // Under a drawing the text stays, unseen (a title's line is hidden instead).
         let under: Vec<Range<usize>> = marks.iter().map(|(range, _)| range.clone()).filter(|range| !range.is_empty()).collect();
         self.retag(&self.clear, &under);
@@ -347,6 +374,7 @@ impl Styler {
     /// Styles the buffer from now on (for Markdown files), or removes all styling.
     pub fn set_enabled(&self, on: bool) {
         self.enabled.set(on);
+        self.mark_live();
         if on {
             self.restyle();
         } else {
@@ -415,6 +443,7 @@ impl Styler {
         }
         self.styled.borrow_mut().take();
         self.buffer.remove_tag(&self.hide, &start, &end);
+        self.buffer.remove_tag(&self.fence, &start, &end);
         self.buffer.remove_tag(&self.clear, &start, &end);
         self.update_panels();
         if let Some(paper) = &*self.paper.borrow() {
@@ -495,7 +524,7 @@ impl Styler {
 
 /// How each kind looks: Ayu Mirage colours, sizes for headings.
 fn tag_for(kind: Kind) -> gtk::TextTag {
-    let heading = |scale: f64| gtk::TextTag::builder().weight(700).scale(scale).foreground(theme::colors().heading.to_hex()).build();
+    let heading = |scale: f64| gtk::TextTag::builder().weight(650).scale(scale).foreground(theme::colors().heading.to_hex()).build();
     let tint = |color: crate::color::Rgb, alpha: f32| gdk::RGBA::new(color.r as f32, color.g as f32, color.b as f32, alpha);
     match kind {
         Kind::Highlight => gtk::TextTag::builder().background_rgba(&tint(theme::colors().changed, 0.32)).build(),
@@ -504,24 +533,25 @@ fn tag_for(kind: Kind) -> gtk::TextTag {
             .background_rgba(&tint(theme::colors().accent, 0.14))
             .build(),
         Kind::Comment => gtk::TextTag::builder().foreground(theme::colors().dim.to_hex()).style(pango::Style::Italic).build(),
-        Kind::Quote => gtk::TextTag::builder().foreground(theme::colors().quote.to_hex()).style(pango::Style::Italic).build(),
+        Kind::Quote => gtk::TextTag::builder().foreground(theme::colors().quote.to_hex()).build(),
         // Its background is a panel the view draws (see `update_panels`): a paragraph background
         // leaves out blank lines, splitting a block in two.
         Kind::CodeBlock => gtk::TextTag::builder()
+            .family(theme::fonts::MONO)
             .foreground(theme::colors().code.to_hex())
             .direction(gtk::TextDirection::Ltr)
             .build(),
-        Kind::Frontmatter | Kind::Html | Kind::Url => gtk::TextTag::builder().foreground(theme::colors().dim.to_hex()).build(),
+        Kind::Frontmatter | Kind::Html => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().dim.to_hex()).build(),
+        Kind::Url => gtk::TextTag::builder().foreground(theme::colors().dim.to_hex()).build(),
         Kind::H1 => heading(1.6),
-        Kind::H2 => heading(1.4),
-        Kind::H3 => heading(1.25),
-        Kind::H4 => heading(1.12),
-        Kind::H5 => heading(1.05),
-        Kind::H6 => heading(1.0),
+        Kind::H2 => heading(1.3),
+        Kind::H3 => heading(1.12),
+        Kind::H4 | Kind::H5 => heading(1.0),
+        Kind::H6 => heading(0.9),
         Kind::Strong => gtk::TextTag::builder().weight(700).build(),
         Kind::Emphasis => gtk::TextTag::builder().style(pango::Style::Italic).build(),
         Kind::Strike => gtk::TextTag::builder().strikethrough(true).foreground(theme::colors().dim.to_hex()).build(),
-        Kind::Code => gtk::TextTag::builder().foreground(theme::colors().code.to_hex()).background(theme::colors().code_background.to_hex()).build(),
+        Kind::Code => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().code.to_hex()).background(theme::colors().code_background.to_hex()).build(),
         Kind::LinkText => gtk::TextTag::builder().foreground(theme::colors().link.to_hex()).underline(pango::Underline::Single).build(),
         Kind::ListMarker => gtk::TextTag::builder().foreground(theme::colors().bullet.to_hex()).weight(700).build(),
         Kind::Task => gtk::TextTag::builder().foreground(theme::colors().accent.to_hex()).weight(700).build(),
@@ -709,6 +739,31 @@ pub fn hidden(source: &str, spans: &Spans, editing: std::ops::RangeInclusive<usi
     }
     hidden.sort_by_key(|range| range.start);
     hidden
+}
+
+/// The lines of the code fences Live Preview hides (those of blocks away from the lines
+/// `editing`), each with its line's end: character ranges, sorted.
+pub fn fences(source: &str, spans: &Spans, editing: std::ops::RangeInclusive<usize>) -> Vec<Range<usize>> {
+    let chars: Vec<char> = source.chars().collect();
+    let edited = lines(&chars, &editing);
+    let is_fence = |range: Range<usize>| {
+        let line: String = chars[range].iter().collect();
+        let line = line.trim_start();
+        line.starts_with("```") || line.starts_with("~~~")
+    };
+    let mut fences = Vec::new();
+    for block in spans.of(Kind::CodeBlock).iter().filter(|block| !overlap(block, &edited)) {
+        let Some(first_end) = (block.start..block.end).find(|&i| chars[i] == '\n') else { continue };
+        if !is_fence(block.start..first_end) {
+            continue;
+        }
+        fences.push(block.start..first_end + 1);
+        let last_start = (block.start..block.end).rev().find(|&i| chars[i] == '\n').map_or(block.start, |i| i + 1);
+        if last_start > first_end && is_fence(last_start..block.end) {
+            fences.push(last_start..(block.end + 1).min(chars.len()));
+        }
+    }
+    fences
 }
 
 /// What Live Preview draws in place of markup away from the lines `editing`, as `hidden` hides
@@ -1400,6 +1455,15 @@ mod tests {
         let s = spans(text);
         assert_eq!(hidden(text, &s, 9..=9), vec![0..7, 19..22]);
         assert_eq!(hidden(text, &s, 1..=1), Vec::<Range<usize>>::new());
+    }
+
+    #[test]
+    fn live_preview_shrinks_the_fence_lines_of_code_blocks_away_from_the_cursor() {
+        let text = "```rust\nlet x = 1;\n```\n\n    indented\n\n~~~\nlast\n~~~";
+        let s = spans(text);
+        // Each fence with its line's end; the last one has none. Indented code has no fences.
+        assert_eq!(fences(text, &s, 3..=3), vec![0..8, 19..23, 38..42, 47..50]);
+        assert_eq!(fences(text, &s, 1..=1), vec![38..42, 47..50]);
     }
 
     /// `text` without what `hidden` hides.

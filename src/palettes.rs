@@ -173,7 +173,8 @@ impl Colors {
             text,
             surface: p.surface,
             accent: on(p.accent, 3.0),
-            heading: on(p.accent, 3.0),
+            // Structure is told by size and weight; the accent is kept for state, a tint of it here.
+            heading: on(text.mix(p.accent, 0.15), 4.5),
             link: on(p.blue, 4.5),
             code: p.cyan.readable_on(code_background, 4.5),
             code_background,

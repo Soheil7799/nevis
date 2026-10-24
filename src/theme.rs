@@ -283,7 +283,7 @@ fn scheme_xml(c: &Colors) -> String {
   <style name="def:underlined" underline="single"/>
   <style name="def:insertion" foreground="{added}"/>
   <style name="def:deletion" foreground="{removed}" strikethrough="true"/>
-  <style name="def:heading" foreground="{heading}" bold="true" scale="1.25"/>
+  <style name="def:heading" foreground="{heading}" bold="true"/>
   <style name="def:emphasis" italic="true"/>
   <style name="def:strong-emphasis" bold="true"/>
   <style name="def:inline-code" foreground="{code}"/>
@@ -328,11 +328,15 @@ fn scheme_xml(c: &Colors) -> String {
 fn chrome_css(c: &Colors) -> String {
     let h = |color: Rgb| color.to_hex();
     let (surface, border, accent, text, dim) = (h(c.surface), h(c.border), h(c.accent), h(c.text), h(c.dim));
-    let (error, code, background) = (h(c.error), h(c.code), h(c.background));
+    let (error, background) = (h(c.error), h(c.background));
     let on_accent = h(if c.accent.contrast(Rgb::BLACK) > c.accent.contrast(Rgb::WHITE) { Rgb::BLACK } else { Rgb::WHITE });
     format!(
         ".nevis-find {{ padding: 6px 10px; border-bottom: 1px solid {border}; }}
-         .nevis-table {{ border: 1px solid {border}; border-radius: 6px; background: {surface}; }}
+         .nevis-table {{ border: none; background: none; }}
+         .nevis-table-head, .nevis-table-cell {{ padding: 7px 22px 7px 0; }}
+         .nevis-table-head {{ color: {dim}; border-bottom: 1px solid {border}; }}
+         .nevis-table-cell {{ border-bottom: 1px solid alpha({border}, 0.5); }}
+         .nevis-table-cell.last {{ border-bottom: none; }}
          .nevis-sidebar, .nevis-sidebar-pane {{ background: {surface}; }}
          /* No padding above and below a row: its indent guides join up with the next row's. */
          .nevis-sidebar > row {{ padding: 0 10px 0 4px; border-radius: 6px; margin: 0 6px; color: {text}; }}
@@ -345,39 +349,43 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-sidebar-header {{ padding: 10px 8px 6px 20px; }}
          .nevis-sidebar-title {{ font-weight: 600; }}
          paned > separator {{ background: {border}; min-width: 1px; }}
-         .nevis-help-backdrop {{ background: alpha(black, 0.45); }}
-         .nevis-switcher {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 12px;
-                           padding: 10px; box-shadow: 0 8px 32px alpha(black, 0.5); }}
+         .nevis-help-backdrop {{ background: alpha(black, 0.3); }}
+         .nevis-switcher {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 14px;
+                           padding: 8px; box-shadow: 0 1px 2px alpha(black, 0.2), 0 16px 48px alpha(black, 0.32); }}
+         /* The search field is the card's top line, not a box in it. */
+         .nevis-switcher > entry {{ background: none; border: none; box-shadow: none; outline: none; border-radius: 0;
+             padding: 6px 8px 10px 8px; font-size: 1.05em; border-bottom: 1px solid {border}; margin-bottom: 2px; }}
          .nevis-switcher-list {{ background: transparent; }}
          .nevis-outline-top {{ font-weight: 600; }}
          .nevis-complete {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 4px;
              box-shadow: 0 6px 18px alpha(black, 0.28); }}
          .nevis-complete-list {{ background: transparent; }}
          .nevis-complete-list > row {{ padding: 4px 8px; border-radius: 5px; min-height: 0; }}
-         .nevis-complete-list > row:selected {{ background: alpha({accent}, 0.18); color: {accent}; }}
+         .nevis-complete-list > row:selected {{ background: alpha({text}, 0.08); color: {text}; }}
          .nevis-outline-empty {{ color: {dim}; padding: 6px 2px; }}
          .nevis-toast {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 999px; padding: 6px 16px;
              box-shadow: 0 6px 18px alpha(black, 0.28); }}
-         .nevis-switcher-list > row {{ padding: 5px 8px; border-radius: 6px; }}
-         .nevis-switcher-list > row:selected {{ background: alpha({accent}, 0.16); color: {accent}; }}
+         .nevis-switcher-list > row {{ padding: 6px 8px; border-radius: 8px; }}
+         .nevis-switcher-list > row:selected {{ background: alpha({text}, 0.08); color: {text}; }}
          .nevis-prompt-error {{ color: {error}; }}
          .nevis-search-status {{ color: {dim}; font-size: smaller; padding: 0 4px; }}
          .nevis-search-place {{ font-size: smaller; }}
-         .nevis-help {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 12px;
-                       padding: 20px 28px; box-shadow: 0 8px 32px alpha(black, 0.5); }}
+         .nevis-help {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 14px;
+                       padding: 20px 28px; box-shadow: 0 1px 2px alpha(black, 0.2), 0 16px 48px alpha(black, 0.32); }}
          .nevis-help-title {{ font-size: 1.3em; font-weight: bold; }}
-         .nevis-help-section {{ color: {accent}; font-weight: bold; }}
-         .nevis-help-keys {{ font-family: \"JetBrains Mono\", monospace; color: {code}; }}
+         .nevis-help-section {{ color: {dim}; font-weight: 600; font-size: 0.85em; }}
+         .nevis-help-keys {{ color: {dim}; font-size: 0.9em; font-feature-settings: \"tnum\"; }}
          /* 16 + a tab's 12: the first title lines up with the rendered text (render::MARGIN). */
-         .nevis-tabbar {{ background: {background}; border-bottom: 1px solid alpha({border}, 0.7); padding: 0 8px 0 16px; }}
+         .nevis-tabbar {{ background: {background}; border-bottom: 1px solid alpha({border}, 0.5); padding: 0 8px 0 16px; }}
          .nevis-tab {{ padding: 8px 4px 0 12px; color: {dim}; transition: color 120ms ease; }}
          .nevis-tab > label {{ padding-bottom: 7px; }}
          .nevis-tab:hover, .nevis-tab.current {{ color: {text}; }}
+         .nevis-tab.current > .nevis-tab-title {{ font-weight: 500; }}
          .nevis-tab > .nevis-tab-number {{ margin-right: 4px; color: alpha({dim}, 0.6); transition: color 120ms ease; }}
          .nevis-tab:hover > .nevis-tab-number, .nevis-tab.current > .nevis-tab-number {{ color: {dim}; }}
          .nevis-tab > .nevis-tab-title {{ background-image: linear-gradient({accent}, {accent}); background-size: 0 2px;
              background-position: center bottom; background-repeat: no-repeat; transition: background-size 160ms ease-out; }}
-         .nevis-tab.current > .nevis-tab-title {{ background-size: 18px 2px; }}
+         .nevis-tab.current > .nevis-tab-title {{ background-size: 100% 2px; }}
          .nevis-tab-close {{ min-width: 10px; padding: 0 6px 7px 6px; color: transparent; border-radius: 999px;
              transition: color 120ms ease, background-color 120ms ease; }}
          .nevis-tab:hover > .nevis-tab-close, .nevis-tab.current > .nevis-tab-close {{ color: {dim}; }}
@@ -389,8 +397,8 @@ fn chrome_css(c: &Colors) -> String {
          /* No padding on the right: the list scrolls right up to the card's edge, so its
             scrollbar sits in the margin instead of over the switches (the rows keep their own). */
          .nevis-settings {{ padding: 22px 0 16px 28px; }}
-         .nevis-settings-title {{ font-size: 1.35em; font-weight: 700; margin-bottom: 2px; }}
-         .nevis-settings-section {{ color: {accent}; font-weight: 600; margin-top: 18px; margin-bottom: 2px; }}
+         .nevis-settings-title {{ font-size: 1.2em; font-weight: 600; margin-bottom: 2px; }}
+         .nevis-settings-section {{ color: {dim}; font-size: 0.85em; font-weight: 600; margin-top: 22px; margin-bottom: 2px; }}
          .nevis-settings-row {{ padding: 8px 0; }}
          /* In a short window, the last row fades out while there is more below. */
          .nevis-settings undershoot.bottom {{ background-image: linear-gradient(to top, {surface}, alpha({surface}, 0));
@@ -399,14 +407,13 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-settings-button {{ padding: 4px 14px; min-height: 0; border-radius: 999px; border: none; box-shadow: none;
              background: alpha({accent}, 0.14); color: {accent}; font-weight: 500; }}
          .nevis-settings-button:hover {{ background: alpha({accent}, 0.24); }}
-         .nevis-switch {{ min-width: 36px; min-height: 18px; padding: 0; border-radius: 999px; border: 2px solid {dim};
-             background: alpha({text}, 0.04); box-shadow: none; transition: background-color 150ms ease, border-color 150ms ease; }}
-         .nevis-switch > .knob {{ min-width: 12px; min-height: 12px; margin-left: 3px; border-radius: 999px; background: {dim};
+         .nevis-switch {{ min-width: 36px; min-height: 20px; padding: 0; border-radius: 999px; border: 2px solid transparent;
+             background: alpha({text}, 0.16); box-shadow: none; transition: background-color 150ms ease, border-color 150ms ease; }}
+         .nevis-switch > .knob {{ min-width: 14px; min-height: 14px; margin-left: 3px; border-radius: 999px; background: {text};
              transition: all 150ms ease; }}
-         .nevis-switch:hover {{ border-color: {text}; }}
-         .nevis-switch:hover > .knob {{ background: {text}; }}
-         .nevis-switch:checked {{ background: {accent}; border-color: {accent}; }}
-         .nevis-switch:checked > .knob {{ min-width: 16px; min-height: 16px; margin-left: 18px; background: {on_accent}; }}
+         .nevis-switch:hover {{ background: alpha({text}, 0.24); }}
+         .nevis-switch:checked {{ background: {accent}; }}
+         .nevis-switch:checked > .knob {{ min-width: 16px; min-height: 16px; margin-left: 16px; background: {on_accent}; }}
          .nevis-switch:focus-visible, .nevis-segments > button:focus-visible {{ outline: 2px solid alpha({accent}, 0.6); outline-offset: 2px; }}
          .nevis-segments {{ background: alpha({text}, 0.06); border-radius: 999px; padding: 3px; }}
          .nevis-segments > button {{ padding: 4px 12px; min-height: 0; border-radius: 999px; border: none; box-shadow: none;
@@ -452,7 +459,7 @@ pub fn apply_font() {
     let size = settings::get().text_size;
     let css = format!(
         "textview.nevis-editor {{ font-family: \"JetBrains Mono\", \"Vazirmatn\", monospace; font-size: {size}pt; }}
-         textview.nevis-read {{ font-family: \"Inter Variable\", \"Inter\", \"Vazirmatn\", sans-serif; font-size: {size}pt; }}"
+         textview.nevis-editor.nevis-live, textview.nevis-read {{ font-family: \"Inter Variable\", \"Inter\", \"Vazirmatn\", sans-serif; font-size: {size}pt; }}"
     );
     FONT_CSS.with(|provider| provider.load_from_string(&css));
 }

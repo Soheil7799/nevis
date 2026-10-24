@@ -534,7 +534,7 @@ impl Default for Paper {
 }
 
 /// How far a callout's box reaches past its text, above and below.
-const PAD: i32 = 6;
+const PAD: i32 = 10;
 
 /// Room above and below a drawn block; a table's padding, inside its border, and the space
 /// between its columns and rows (as the rendered view's).
@@ -732,7 +732,7 @@ fn draw_panels(view: &Paper, panels: &[Panel], snapshot: &gtk::Snapshot) {
         match &panel.look {
             Look::Box(color) => {
                 let rect = graphene::Rect::new(start, y as f32, end - start, height as f32);
-                snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(rect, 6.0));
+                snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(rect, 8.0));
                 snapshot.append_color(color, &rect);
                 snapshot.pop();
             }

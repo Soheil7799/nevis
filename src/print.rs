@@ -121,6 +121,7 @@ fn lay_out(layer: &gtk::Overlay, content: &Content<'_>, width: i32) -> (Paper, g
             let rendered = theme::with_colors(paper.clone(), || render::render(text, folder.as_ref(), find, scheme.as_ref(), &layout, 0));
             view.set_buffer(Some(&rendered.buffer));
             view.set_panels(rendered.panels);
+            view.set_marks(rendered.marks);
             for (anchor, widget) in &rendered.children {
                 view.add_child_at_anchor(widget, anchor);
             }
@@ -161,12 +162,13 @@ fn style_paper() {
         return;
     }
     let colors = theme::paper_colors();
-    let (text, border, surface) = (colors.text.to_hex(), colors.border.to_hex(), colors.surface.to_hex());
+    let (text, border, dim) = (colors.text.to_hex(), colors.border.to_hex(), colors.dim.to_hex());
     let css = gtk::CssProvider::new();
     css.load_from_string(&format!(
         "textview.nevis-print, textview.nevis-print > text {{ background: none; font-size: {TEXT_PT}pt; }}
          textview.nevis-print label {{ color: {text}; }}
-         textview.nevis-print .nevis-table {{ border: 1px solid {border}; border-radius: 6px; background: {surface}; }}"
+         textview.nevis-print .nevis-table-head {{ color: {dim}; border-bottom-color: {border}; }}
+         textview.nevis-print .nevis-table-cell {{ border-bottom-color: alpha({border}, 0.5); }}"
     ));
     gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_USER + 3);
 }

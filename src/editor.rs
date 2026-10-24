@@ -146,8 +146,8 @@ impl Editor {
         // line holding hidden text (Live Preview's markup; see `Paper::iter_at`).
         view.set_top_margin(8);
         view.set_bottom_margin(12);
-        view.set_pixels_above_lines(4);
-        view.set_pixels_inside_wrap(2);
+        view.set_pixels_above_lines(6);
+        view.set_pixels_inside_wrap(6);
         view.set_highlight_current_line(true);
         view.set_auto_indent(true);
         view.set_insert_spaces_instead_of_tabs(true);
@@ -165,7 +165,7 @@ impl Editor {
         reader.set_right_margin(render::MARGIN);
         reader.set_top_margin(18);
         reader.set_bottom_margin(28);
-        reader.set_pixels_inside_wrap(3);
+        reader.set_pixels_inside_wrap(6);
         reader.set_extra_menu(Some(&crate::window::menu_model()));
 
         let edit_scroller = gtk::ScrolledWindow::builder().child(&view).build();
@@ -635,6 +635,7 @@ impl Editor {
 
     pub fn set_line_numbers(&self, on: bool) {
         self.view.set_show_line_numbers(on);
+        self.styler.numbers_changed();
         self.fit_width();
     }
 
@@ -881,6 +882,7 @@ impl Editor {
             render::render(&text, folder.as_ref(), &find, theme::scheme().as_ref(), &layout, self.reader_margin.get());
         self.reader.show_buffer(&rendered.buffer);
         self.reader.set_panels(rendered.panels);
+        self.reader.set_marks(rendered.marks);
         for (anchor, widget) in &rendered.children {
             self.reader.add_child_at_anchor(widget, anchor);
         }
@@ -1140,6 +1142,7 @@ impl Editor {
         let rendered = render::render(&start, folder.as_ref(), &find, theme::scheme().as_ref(), &layout, 14);
         view.set_buffer(Some(&rendered.buffer));
         view.set_panels(rendered.panels);
+        view.set_marks(rendered.marks);
         view.set_left_margin(14);
         view.set_right_margin(14);
         for (anchor, widget) in &rendered.children {
