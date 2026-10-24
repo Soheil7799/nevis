@@ -331,7 +331,7 @@ fn chrome_css(c: &Colors) -> String {
     let (error, background) = (h(c.error), h(c.background));
     let on_accent = h(if c.accent.contrast(Rgb::BLACK) > c.accent.contrast(Rgb::WHITE) { Rgb::BLACK } else { Rgb::WHITE });
     format!(
-        ".nevis-find {{ padding: 6px 10px; border-bottom: 1px solid {border}; }}
+        ".nevis-find {{ padding: 6px 10px; background: {surface}; border-bottom: 1px solid alpha({border}, 0.6); }}
          .nevis-table {{ border: none; background: none; }}
          .nevis-table-head, .nevis-table-cell {{ padding: 7px 22px 7px 0; }}
          .nevis-table-head {{ color: {dim}; border-bottom: 1px solid {border}; }}
@@ -375,18 +375,17 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-help-title {{ font-size: 1.3em; font-weight: bold; }}
          .nevis-help-section {{ color: {dim}; font-weight: 600; font-size: 0.85em; }}
          .nevis-help-keys {{ color: {dim}; font-size: 0.9em; font-feature-settings: \"tnum\"; }}
-         /* 16 + a tab's 12: the first title lines up with the rendered text (render::MARGIN). */
-         .nevis-tabbar {{ background: {background}; border-bottom: 1px solid alpha({border}, 0.5); padding: 0 8px 0 16px; }}
-         .nevis-tab {{ padding: 8px 4px 0 12px; color: {dim}; transition: color 120ms ease; }}
-         .nevis-tab > label {{ padding-bottom: 7px; }}
-         .nevis-tab:hover, .nevis-tab.current {{ color: {text}; }}
+         /* The tab bar and the sidebar are the window's frame, in the surface colour; the tab in
+            front is cut from the page, in its colour, so it reads as the page's own. */
+         .nevis-tabbar {{ background: {surface}; padding: 6px 8px 0 8px; }}
+         .nevis-tab {{ padding: 0 4px 0 12px; margin-right: 2px; border-radius: 8px 8px 0 0; color: {dim};
+             transition: color 120ms ease, background-color 120ms ease; }}
+         .nevis-tab > label {{ padding: 7px 0; }}
+         .nevis-tab:hover {{ color: {text}; background-color: alpha({text}, 0.05); }}
+         .nevis-tab.current {{ color: {text}; background-color: {background}; }}
          .nevis-tab.current > .nevis-tab-title {{ font-weight: 500; }}
-         .nevis-tab > .nevis-tab-number {{ margin-right: 4px; color: alpha({dim}, 0.6); transition: color 120ms ease; }}
-         .nevis-tab:hover > .nevis-tab-number, .nevis-tab.current > .nevis-tab-number {{ color: {dim}; }}
-         .nevis-tab > .nevis-tab-title {{ background-image: linear-gradient({accent}, {accent}); background-size: 0 2px;
-             background-position: center bottom; background-repeat: no-repeat; transition: background-size 160ms ease-out; }}
-         .nevis-tab.current > .nevis-tab-title {{ background-size: 100% 2px; }}
-         .nevis-tab-close {{ min-width: 10px; padding: 0 6px 7px 6px; color: transparent; border-radius: 999px;
+         .nevis-tab > .nevis-tab-number {{ margin-right: 6px; color: {accent}; font-weight: 600; }}
+         .nevis-tab-close {{ min-width: 10px; padding: 0 6px; margin: 6px 0; color: transparent; border-radius: 999px;
              transition: color 120ms ease, background-color 120ms ease; }}
          .nevis-tab:hover > .nevis-tab-close, .nevis-tab.current > .nevis-tab-close {{ color: {dim}; }}
          .nevis-tab > .nevis-tab-close.unsaved {{ color: {accent}; font-size: 0.7em; }}

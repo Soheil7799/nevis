@@ -87,6 +87,8 @@ pub struct Rendered {
     pub panels: Vec<Panel>,
     /// What the view draws over the text (tasks' boxes), as character ranges.
     pub marks: Vec<(Range<usize>, crate::style::Mark)>,
+    /// Rounded backgrounds behind inline code and #tags, as character ranges.
+    pub chips: Vec<(Range<usize>, gdk::RGBA)>,
 }
 
 /// A block drawn on a panel behind its text (by `paper::Paper`): from `start`'s line to
@@ -202,7 +204,8 @@ impl Styles {
             strong: add(gtk::TextTag::builder().weight(700).build()),
             emphasis: add(gtk::TextTag::builder().style(pango::Style::Italic).build()),
             strike: add(gtk::TextTag::builder().strikethrough(true).build()),
-            code: add(gtk::TextTag::builder().family(fonts::MONO).foreground(theme::colors().code.to_hex()).background(theme::colors().code_background.to_hex()).build()),
+            // Its background is a chip the view draws (see `Paper::set_chips`).
+            code: add(gtk::TextTag::builder().family(fonts::MONO).foreground(theme::colors().code.to_hex()).build()),
             // Its background is a panel (see `Panel`): a paragraph background leaves out blank
             // lines, splitting a block in two.
             code_block: add(gtk::TextTag::builder()
@@ -274,6 +277,7 @@ struct Renderer<'m> {
     /// Blocks drawn on panels (see `Panel`), outer ones first, and those open now.
     panels: Vec<Panel>,
     marks: Vec<(Range<usize>, crate::style::Mark)>,
+    chips: Vec<(Range<usize>, gdk::RGBA)>,
     open: Vec<Open>,
     /// Where text starts, from both sides of the view: the margin, further in on panels.
     left: i32,
@@ -354,6 +358,7 @@ impl<'m> Renderer<'m> {
             depth: 0,
             panels: Vec::new(),
             marks: Vec::new(),
+            chips: Vec::new(),
             open: Vec::new(),
             left: margin,
             origin: margin,
@@ -419,7 +424,10 @@ impl<'m> Renderer<'m> {
             Event::End(tag) => self.end(tag),
             Event::Text(text) => self.text_at(&text, range),
             // U+2068…U+2069 isolate the span: `~/notes/a.md` inside Persian stays in order.
-            Event::Code(text) => self.styled(&format!("\u{2068}{text}\u{2069}"), self.styles.code.clone(), "<tt>", "</tt>"),
+            Event::Code(text) => {
+                let colors = theme::colors();
+                self.chip(&format!("\u{2068}{text}\u{2069}"), self.styles.code.clone(), "<tt>", "</tt>", rgba(colors.code_background, 1.0));
+            }
             Event::InlineMath(latex) => self.math(&latex, false),
             Event::DisplayMath(latex) => self.math(&latex, true),
             Event::Html(html) | Event::InlineHtml(html) => {
@@ -921,13 +929,21 @@ impl<'m> Renderer<'m> {
     /// `#tag`, as a small clickable label that searches for it.
     fn tag(&mut self, tag: &str) {
         let accent = theme::colors().accent;
-        let pill = gtk::TextTag::builder()
-            .foreground(accent.to_hex())
-            .background_rgba(&gdk::RGBA::new(accent.r as f32, accent.g as f32, accent.b as f32, 0.14))
-            .build();
+        let pill = gtk::TextTag::builder().foreground(accent.to_hex()).build();
         self.buffer.tag_table().add(&pill);
         self.targets.push((pill.clone(), Target::Tag(tag.to_owned())));
-        self.styled(tag, pill, "", "");
+        self.chip(tag, pill, "", "", rgba(accent, 0.14));
+    }
+
+    /// `text` as `styled` writes it, on a chip of `color` the view draws (out of a table: in
+    /// one, a label's markup has no chips).
+    fn chip(&mut self, text: &str, tag: gtk::TextTag, open: &str, close: &str, color: gdk::RGBA) {
+        let start = self.buffer.end_iter().offset() as usize;
+        self.styled(text, tag, open, close);
+        let end = self.buffer.end_iter().offset() as usize;
+        if self.table.is_none() && end > start {
+            self.chips.push((start..end, color));
+        }
     }
 
     /// Front matter as Obsidian's properties: each name, then its values (tags as tags, links as
@@ -1337,6 +1353,7 @@ impl<'m> Renderer<'m> {
             code: self.code,
             panels: self.panels,
             marks: self.marks,
+            chips: self.chips,
         }
     }
 

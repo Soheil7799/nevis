@@ -627,6 +627,37 @@ impl Window {
             glib::Propagation::Stop
         });
         self.window.add_controller(keys);
+
+        // The tabs' numbers (for Alt+1 … Alt+9) show while Alt is held.
+        let alt = |key: gdk::Key| matches!(key, gdk::Key::Alt_L | gdk::Key::Alt_R);
+        let numbers = gtk::EventControllerKey::new();
+        numbers.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(self);
+        numbers.connect_key_pressed(move |_, key, _, _| {
+            if alt(key) && let Some(this) = weak.upgrade() {
+                this.show_numbers(true);
+            }
+            glib::Propagation::Proceed
+        });
+        let weak = Rc::downgrade(self);
+        numbers.connect_key_released(move |_, key, _, _| {
+            if alt(key) && let Some(this) = weak.upgrade() {
+                this.show_numbers(false);
+            }
+        });
+        self.window.add_controller(numbers);
+        let weak = Rc::downgrade(self);
+        self.window.connect_is_active_notify(move |window| {
+            if !window.is_active() && let Some(this) = weak.upgrade() {
+                this.show_numbers(false);
+            }
+        });
+    }
+
+    fn show_numbers(&self, on: bool) {
+        for editor in self.tabs() {
+            editor.show_number(on);
+        }
     }
 
     /// The tab in front switched between the rendered view and the source.

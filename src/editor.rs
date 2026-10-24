@@ -883,6 +883,7 @@ impl Editor {
         self.reader.show_buffer(&rendered.buffer);
         self.reader.set_panels(rendered.panels);
         self.reader.set_marks(rendered.marks);
+        self.reader.set_chips(rendered.chips);
         for (anchor, widget) in &rendered.children {
             self.reader.add_child_at_anchor(widget, anchor);
         }
@@ -1143,6 +1144,7 @@ impl Editor {
         view.set_buffer(Some(&rendered.buffer));
         view.set_panels(rendered.panels);
         view.set_marks(rendered.marks);
+        view.set_chips(rendered.chips);
         view.set_left_margin(14);
         view.set_right_margin(14);
         for (anchor, widget) in &rendered.children {
@@ -2189,10 +2191,15 @@ impl Editor {
         }
     }
 
-    /// Shows the number Alt+number picks this tab by; `None` for a tab no number reaches.
+    /// The number Alt+number picks this tab by (`None` for a tab no number reaches), shown
+    /// while Alt is held (`show_number`).
     pub fn set_number(&self, number: Option<usize>) {
         self.tab_number.set_text(&number.map(|n| n.to_string()).unwrap_or_default());
-        self.tab_number.set_visible(number.is_some());
+        self.tab_number.set_visible(number.is_some() && self.tab_number.is_visible());
+    }
+
+    pub fn show_number(&self, on: bool) {
+        self.tab_number.set_visible(on && !self.tab_number.text().is_empty());
     }
 
     fn update_tab(&self) {

@@ -122,6 +122,7 @@ fn lay_out(layer: &gtk::Overlay, content: &Content<'_>, width: i32) -> (Paper, g
             view.set_buffer(Some(&rendered.buffer));
             view.set_panels(rendered.panels);
             view.set_marks(rendered.marks);
+            view.set_chips(rendered.chips);
             for (anchor, widget) in &rendered.children {
                 view.add_child_at_anchor(widget, anchor);
             }

@@ -304,14 +304,15 @@ impl Styler {
     /// staying where it is.
     fn update_panels(&self) {
         let Some(paper) = self.paper.borrow().clone() else { return };
-        let (panels, code) = match &*self.styled.borrow() {
+        let colors = theme::colors();
+        let (panels, code, chips) = match &*self.styled.borrow() {
             Some((text, spans)) if self.enabled.get() => {
                 let quotes = if self.live.get() { panels(text, spans) } else { Vec::new() };
-                (quotes, spans.of(Kind::CodeBlock).to_vec())
+                (quotes, spans.of(Kind::CodeBlock).to_vec(), chips(spans, &colors))
             }
-            _ => (Vec::new(), Vec::new()),
+            _ => (Vec::new(), Vec::new(), Vec::new()),
         };
-        let colors = theme::colors();
+        paper.set_chips(chips);
         let code = code.into_iter().map(|range| render::Panel {
             start: self.buffer.create_mark(None, &self.iter_at(range.start), true),
             end: self.buffer.create_mark(None, &self.iter_at(range.end), false),
@@ -528,10 +529,8 @@ fn tag_for(kind: Kind) -> gtk::TextTag {
     let tint = |color: crate::color::Rgb, alpha: f32| gdk::RGBA::new(color.r as f32, color.g as f32, color.b as f32, alpha);
     match kind {
         Kind::Highlight => gtk::TextTag::builder().background_rgba(&tint(theme::colors().changed, 0.32)).build(),
-        Kind::Tag => gtk::TextTag::builder()
-            .foreground(theme::colors().accent.to_hex())
-            .background_rgba(&tint(theme::colors().accent, 0.14))
-            .build(),
+        // Their backgrounds are chips the view draws (see `update_panels`).
+        Kind::Tag => gtk::TextTag::builder().foreground(theme::colors().accent.to_hex()).build(),
         Kind::Comment => gtk::TextTag::builder().foreground(theme::colors().dim.to_hex()).style(pango::Style::Italic).build(),
         Kind::Quote => gtk::TextTag::builder().foreground(theme::colors().quote.to_hex()).build(),
         // Its background is a panel the view draws (see `update_panels`): a paragraph background
@@ -551,7 +550,7 @@ fn tag_for(kind: Kind) -> gtk::TextTag {
         Kind::Strong => gtk::TextTag::builder().weight(700).build(),
         Kind::Emphasis => gtk::TextTag::builder().style(pango::Style::Italic).build(),
         Kind::Strike => gtk::TextTag::builder().strikethrough(true).foreground(theme::colors().dim.to_hex()).build(),
-        Kind::Code => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().code.to_hex()).background(theme::colors().code_background.to_hex()).build(),
+        Kind::Code => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().code.to_hex()).build(),
         Kind::LinkText => gtk::TextTag::builder().foreground(theme::colors().link.to_hex()).underline(pango::Underline::Single).build(),
         Kind::ListMarker => gtk::TextTag::builder().foreground(theme::colors().bullet.to_hex()).weight(700).build(),
         Kind::Task => gtk::TextTag::builder().foreground(theme::colors().accent.to_hex()).weight(700).build(),
@@ -739,6 +738,20 @@ pub fn hidden(source: &str, spans: &Spans, editing: std::ops::RangeInclusive<usi
     }
     hidden.sort_by_key(|range| range.start);
     hidden
+}
+
+/// The backgrounds behind inline code and #tags, as `Paper::set_chips` takes them.
+fn chips(spans: &Spans, colors: &crate::palettes::Colors) -> Vec<(Range<usize>, gdk::RGBA)> {
+    let code = render::rgba(colors.code_background, 1.0);
+    let tag = render::rgba(colors.accent, 0.14);
+    let mut chips: Vec<_> = spans
+        .of(Kind::Code)
+        .iter()
+        .map(|range| (range.clone(), code))
+        .chain(spans.of(Kind::Tag).iter().map(|range| (range.clone(), tag)))
+        .collect();
+    chips.sort_by_key(|(range, _)| range.start);
+    chips
 }
 
 /// The lines of the code fences Live Preview hides (those of blocks away from the lines

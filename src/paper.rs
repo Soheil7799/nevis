@@ -36,6 +36,8 @@ mod imp {
     pub struct Paper {
         pub panels: RefCell<Vec<Panel>>,
         pub marks: RefCell<Vec<(Range<usize>, Mark)>>,
+        /// Rounded backgrounds behind inline code and #tags: character ranges, sorted.
+        pub chips: RefCell<Vec<(Range<usize>, gdk::RGBA)>>,
         /// Live Preview's blocks: those asked for (lines, kind, source), those drawn, and the
         /// room kept above the first line of those taller drawn than written.
         pub wanted: RefCell<Vec<(Range<usize>, Block, String)>>,
@@ -91,6 +93,7 @@ mod imp {
         fn snapshot_layer(&self, layer: gtk::TextViewLayer, snapshot: gtk::Snapshot) {
             if layer == gtk::TextViewLayer::BelowText {
                 super::draw_panels(&self.obj(), &self.panels.borrow(), &snapshot);
+                super::draw_chips(&self.obj(), &self.chips.borrow(), &snapshot);
             }
             self.parent_snapshot_layer(layer, snapshot.clone());
             if layer == gtk::TextViewLayer::AboveText {
@@ -162,6 +165,15 @@ impl Paper {
             }
         }
         self.queue_draw();
+    }
+
+    /// Draws rounded backgrounds behind `chips` (sorted character ranges of the buffer shown
+    /// now): a text tag's background has no padding and no corners.
+    pub fn set_chips(&self, chips: Vec<(Range<usize>, gdk::RGBA)>) {
+        if *self.imp().chips.borrow() != chips {
+            *self.imp().chips.borrow_mut() = chips;
+            self.queue_draw();
+        }
     }
 
     /// Draws `marks` (sorted character ranges of the buffer shown now) over the text.
@@ -741,6 +753,57 @@ fn draw_panels(view: &Paper, panels: &[Panel], snapshot: &gtk::Snapshot) {
                 snapshot.append_color(color, &graphene::Rect::new(x, y as f32, 3.0, height as f32));
             }
         }
+    }
+}
+
+/// `chips` behind the text, in buffer coordinates: those on screen, a piece on each line one
+/// wraps over.
+fn draw_chips(view: &Paper, chips: &[(Range<usize>, gdk::RGBA)], snapshot: &gtk::Snapshot) {
+    if chips.is_empty() {
+        return;
+    }
+    let buffer = view.buffer();
+    let seen = view.visible_rect();
+    let offset = |x: i32, y: i32| view.iter_at(x, y).map(|iter| iter.offset() as usize);
+    let first = offset(seen.x(), seen.y()).unwrap_or(0);
+    let last = offset(seen.x() + seen.width(), seen.y() + seen.height()).unwrap_or(usize::MAX);
+    let from = chips.partition_point(|(range, _)| range.end < first);
+    const PAD: f32 = 2.0;
+    let piece = |start: &gtk::TextIter, end: &gtk::TextIter, color: &gdk::RGBA| {
+        let at = place(view, start);
+        let (left, width) = span(view, start, end);
+        if width <= 0.0 {
+            return;
+        }
+        let rect = graphene::Rect::new(left - PAD, at.y() as f32 + 1.0, width + 2.0 * PAD, (at.height() - 2).max(1) as f32);
+        snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(rect, 4.0));
+        snapshot.append_color(color, &rect);
+        snapshot.pop();
+    };
+    for (range, color) in &chips[from..] {
+        if range.start > last {
+            break;
+        }
+        let (start, end) = (buffer.iter_at_offset(range.start as i32), buffer.iter_at_offset(range.end as i32));
+        if place(view, &start).y() == place(view, &end).y() {
+            piece(&start, &end, color);
+            continue;
+        }
+        // Wrapped: a piece from each line's first character to its last.
+        let (mut line_start, mut iter) = (start, start);
+        let mut y = place(view, &start).y();
+        while iter.offset() < end.offset() {
+            let mut next = iter;
+            next.forward_char();
+            let next_y = if next.offset() < end.offset() { place(view, &next).y() } else { y };
+            if next_y != y {
+                piece(&line_start, &next, color);
+                line_start = next;
+                y = next_y;
+            }
+            iter = next;
+        }
+        piece(&line_start, &end, color);
     }
 }
 
