@@ -409,6 +409,12 @@ impl Window {
         self.on_current("print", |_, e| spawn(e.print(None)));
         self.on_current("export-pdf", |_, e| spawn(e.export_pdf()));
         self.on_current("export-html", |_, e| spawn(e.export_html()));
+        // Without asking where (for trying it: NEVIS_ACTIONS=win.export-html-to:/tmp/a.html).
+        self.with_path("export-html-to", |w, file| {
+            if let (Some(editor), Some(path)) = (w.current(), file.path()) {
+                editor.write_html(&path);
+            }
+        });
         {
             use crate::tables::{Align, Edit};
             for (name, edit) in [

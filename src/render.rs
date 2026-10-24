@@ -644,25 +644,9 @@ impl<'m> Renderer<'m> {
             TagEnd::CodeBlock => {
                 // Flowcharts and sequence diagrams are drawn; other diagrams are shown as their code.
                 if let Some(source) = self.mermaid.take() {
-                    if let Some(chart) = flowchart::parse(&source) {
+                    if let Some(picture) = diagram(&source, self.text) {
                         self.code_language = None;
-                        return self.figure(flowchart::picture(&chart, self.text).upcast());
-                    }
-                    if let Some(chart) = state::parse(&source) {
-                        self.code_language = None;
-                        return self.figure(flowchart::picture(&chart, self.text).upcast());
-                    }
-                    if let Some(diagram) = classes::parse(&source) {
-                        self.code_language = None;
-                        return self.figure(classes::picture(&diagram, self.text).upcast());
-                    }
-                    if let Some(chart) = gantt::parse(&source) {
-                        self.code_language = None;
-                        return self.figure(gantt::picture(&chart, self.text).upcast());
-                    }
-                    if let Some(diagram) = sequence::parse(&source) {
-                        self.code_language = None;
-                        return self.figure(sequence::picture(&diagram, self.text).upcast());
+                        return self.figure(picture.upcast());
                     }
                     self.code_start = Some(self.buffer.end_iter().offset());
                     self.code_text = Some(String::new());
@@ -1629,6 +1613,21 @@ pub fn display_width(text: &str) -> usize {
             _ => 1,
         })
         .sum()
+}
+
+/// A Mermaid diagram nevis draws (flowcharts, state, class, sequence and Gantt diagrams),
+/// its words laid out by `text`; `None` for one it doesn't.
+pub fn diagram(source: &str, text: &dyn Fn(&str) -> pango::Layout) -> Option<gtk::Picture> {
+    if let Some(chart) = flowchart::parse(source).or_else(|| state::parse(source)) {
+        return Some(flowchart::picture(&chart, text));
+    }
+    if let Some(diagram) = classes::parse(source) {
+        return Some(classes::picture(&diagram, text));
+    }
+    if let Some(chart) = gantt::parse(source) {
+        return Some(gantt::picture(&chart, text));
+    }
+    sequence::parse(source).map(|diagram| sequence::picture(&diagram, text))
 }
 
 fn table_widget(table: Table) -> gtk::Widget {

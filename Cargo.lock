@@ -417,6 +417,7 @@ dependencies = [
 name = "nevis"
 version = "0.1.2"
 dependencies = [
+ "cairo-rs",
  "gio",
  "gtk4",
  "pulldown-cmark",

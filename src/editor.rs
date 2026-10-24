@@ -1930,11 +1930,32 @@ impl Editor {
             dialog.set_initial_folder(Some(folder));
         }
         let Ok(file) = dialog.save_future(Some(&self.window)).await else { return };
-        let Some(path) = file.path() else { return };
+        if let Some(path) = file.path() {
+            self.write_html(&path);
+        }
+    }
+
+    /// Writes the note as an HTML page to `path`.
+    pub fn write_html(&self, path: &std::path::Path) {
+        let name = self.print_name();
+        let stem = std::path::Path::new(&name).file_stem().map_or(name.clone(), |stem| stem.to_string_lossy().into_owned());
+        let folder = self.location().and_then(|l| l.parent());
         let find = |link: &str| self.find(link);
         let folder = folder.and_then(|f| f.path());
-        let page = crate::html::page(&stem, &self.text(), folder.as_deref(), &find, &theme::paper_colors(), &theme::colors());
-        if let Err(error) = std::fs::write(&path, page) {
+        // Each diagram drawn twice, in the page's light colours and the window's, for a
+        // reader in either mode.
+        let reader = self.reader.clone();
+        let text = move |words: &str| reader.create_pango_layout(Some(words));
+        let draw = |source: &str, colors: Rc<crate::palettes::Colors>| {
+            theme::with_colors(colors, || render::diagram(source, &text)).and_then(|picture| crate::html::svg(&picture))
+        };
+        let diagram = |source: &str| {
+            let light = draw(source, theme::paper_colors())?;
+            let dark = draw(source, theme::colors()).unwrap_or_else(|| light.clone());
+            Some(crate::html::figure(&light, &dark, "Diagram"))
+        };
+        let page = crate::html::page(&stem, &self.text(), folder.as_deref(), &find, &diagram, &theme::paper_colors(), &theme::colors());
+        if let Err(error) = std::fs::write(path, page) {
             alert(&self.window, "Couldn't export", &error.to_string());
         }
     }

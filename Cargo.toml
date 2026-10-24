@@ -19,6 +19,7 @@ path = "src/main.rs"
 gio = "0.22"
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 sourceview = { package = "sourceview5", version = "0.11" }
+cairo-rs = { version = "0.22", features = ["svg"] }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["simd", "html"] }
 
 [profile.release]

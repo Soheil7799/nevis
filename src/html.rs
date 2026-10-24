@@ -1,41 +1,119 @@
 //! A note as one HTML file: its Markdown as a page in the PDF's colours (and the window's,
-//! for a reader in dark mode), its pictures inside it, so that it can be sent on its own.
+//! for a reader in dark mode), its pictures and diagrams inside it, so that it can be sent on
+//! its own.
 
 use std::path::Path;
 
 use gtk::{gio, glib, prelude::*};
-use pulldown_cmark::{Event, LinkType, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, LinkType, Parser, Tag, TagEnd};
 
 use crate::palettes::Colors;
 use crate::render::OPTIONS;
 
 /// The page for `markdown`, called `title`; pictures are looked up with `find` (a note's
-/// links, as the rendered view follows them), else beside the note in `folder`.
-pub fn page(title: &str, markdown: &str, folder: Option<&Path>, find: &dyn Fn(&str) -> Option<gio::File>, light: &Colors, dark: &Colors) -> String {
+/// links, as the rendered view follows them), else beside the note in `folder`; Mermaid
+/// diagrams are drawn by `diagram` (HTML for one, `None` for one nevis doesn't draw).
+pub fn page(
+    title: &str,
+    markdown: &str,
+    folder: Option<&Path>,
+    find: &dyn Fn(&str) -> Option<gio::File>,
+    diagram: &dyn Fn(&str) -> Option<String>,
+    light: &Colors,
+    dark: &Colors,
+) -> String {
+    let mut events: Vec<Event> = Vec::new();
     let mut in_metadata = false;
-    let events = Parser::new_ext(markdown, OPTIONS).filter_map(|event| match event {
-        // Front matter is for the notes app, not the reader.
-        Event::Start(Tag::MetadataBlock(_)) => {
-            in_metadata = true;
-            None
+    let mut mermaid: Option<String> = None;
+    for event in Parser::new_ext(markdown, OPTIONS) {
+        match event {
+            // Front matter is for the notes app, not the reader.
+            Event::Start(Tag::MetadataBlock(_)) => in_metadata = true,
+            Event::End(TagEnd::MetadataBlock(_)) => in_metadata = false,
+            _ if in_metadata => {}
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref language))) if language.as_ref() == "mermaid" => {
+                mermaid = Some(String::new());
+                events.push(event);
+            }
+            Event::Text(ref text) if mermaid.is_some() => {
+                if let Some(source) = &mut mermaid {
+                    source.push_str(text);
+                }
+                events.push(event);
+            }
+            Event::End(TagEnd::CodeBlock) if mermaid.is_some() => {
+                let source = mermaid.take().unwrap_or_default();
+                match diagram(&source) {
+                    // The code block's start and text give way to the drawing.
+                    Some(html) => {
+                        while !matches!(events.pop(), Some(Event::Start(Tag::CodeBlock(_))) | None) {}
+                        events.push(Event::Html(CowStr::from(html)));
+                    }
+                    None => events.push(event),
+                }
+            }
+            Event::InlineMath(latex) => events.push(Event::InlineHtml(CowStr::from(math(&latex, false)))),
+            Event::DisplayMath(latex) => events.push(Event::Html(CowStr::from(math(&latex, true)))),
+            Event::Start(Tag::Image { link_type, dest_url, title, id }) => {
+                let dest_url = picture(&dest_url, link_type, folder, find).map_or(dest_url, Into::into);
+                events.push(Event::Start(Tag::Image { link_type, dest_url, title, id }));
+            }
+            event => events.push(event),
         }
-        Event::End(TagEnd::MetadataBlock(_)) => {
-            in_metadata = false;
-            None
-        }
-        _ if in_metadata => None,
-        Event::Start(Tag::Image { link_type, dest_url, title, id }) => {
-            let dest_url = picture(&dest_url, link_type, folder, find).map_or(dest_url, Into::into);
-            Some(Event::Start(Tag::Image { link_type, dest_url, title, id }))
-        }
-        event => Some(event),
-    });
+    }
     let mut body = String::new();
-    pulldown_cmark::html::push_html(&mut body, events);
+    pulldown_cmark::html::push_html(&mut body, events.into_iter());
     format!(
         "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>{}</title>\n<style>\n{}</style>\n</head>\n<body>\n<main>\n{body}</main>\n</body>\n</html>\n",
         glib::markup_escape_text(title),
         style(light, dark)
+    )
+}
+
+/// A formula as the rendered view writes it (`math::runs`): raised runs as superscripts,
+/// lowered ones as subscripts.
+fn math(latex: &str, display: bool) -> String {
+    let mut out = String::from(if display { "<div class=\"math\">" } else { "<span class=\"math\">" });
+    for run in crate::math::runs(latex) {
+        let text = glib::markup_escape_text(&run.text);
+        match run.rise {
+            rise if rise > 0 => out.push_str(&format!("<sup>{text}</sup>")),
+            rise if rise < 0 => out.push_str(&format!("<sub>{text}</sub>")),
+            _ => out.push_str(&text),
+        }
+    }
+    out.push_str(if display { "</div>\n" } else { "</span>" });
+    out
+}
+
+/// A diagram's picture as SVG, drawn from what GTK would paint: `None` if it has nothing.
+pub fn svg(picture: &gtk::Picture) -> Option<String> {
+    let paintable = picture.paintable()?;
+    let (width, height) = (paintable.intrinsic_width() as f64, paintable.intrinsic_height() as f64);
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let snapshot = gtk::Snapshot::new();
+    paintable.snapshot(&snapshot, width, height);
+    let node = snapshot.to_node()?;
+    let surface = cairo::SvgSurface::for_stream(width, height, Vec::<u8>::new()).ok()?;
+    {
+        let context = cairo::Context::new(&surface).ok()?;
+        node.draw(&context);
+    }
+    let bytes = surface.finish_output_stream().ok()?.downcast::<Vec<u8>>().ok()?;
+    String::from_utf8(*bytes).ok()
+}
+
+/// A diagram drawn in the page's light colours and its dark ones, as a figure that shows the
+/// one the reader's mode asks for.
+pub fn figure(light: &str, dark: &str, alt: &str) -> String {
+    let data = |svg: &str| format!("data:image/svg+xml;base64,{}", glib::base64_encode(svg.as_bytes()));
+    format!(
+        "<figure><picture><source srcset=\"{}\" media=\"(prefers-color-scheme: dark)\"><img src=\"{}\" alt=\"{}\"></picture></figure>\n",
+        data(dark),
+        data(light),
+        glib::markup_escape_text(alt)
     )
 }
 
@@ -103,6 +181,10 @@ table {{ border-collapse: collapse; margin: 1em 0; }}
 th, td {{ text-align: start; padding: 0.4em 1.4em 0.4em 0; border-bottom: 1px solid var(--border); }}
 th {{ color: var(--dim); font-weight: 600; }}
 img {{ max-width: 100%; border-radius: 6px; }}
+figure {{ margin: 1.5em 0; text-align: center; }}
+figure img {{ border-radius: 0; }}
+.math {{ font-family: \"DejaVu Math TeX Gyre\", \"Noto Sans Math\", \"STIX Two Math\", serif; }}
+div.math {{ text-align: center; margin: 1em 0; font-size: 1.15em; }}
 hr {{ border: none; border-top: 1px solid var(--border); margin: 2em 0; }}
 li:has(> input[type=checkbox]) {{ list-style: none; margin-inline-start: -1.4em; }}
 input[type=checkbox] {{ accent-color: var(--accent); margin-inline-end: 0.5em; }}
@@ -122,7 +204,7 @@ mod tests {
 
     #[test]
     fn a_note_becomes_a_page_without_its_front_matter() {
-        let page = page("Plan & co", "---\ntags: [a]\n---\n# Weekly plan\n\n- [x] done\n", None, &|_| None, &colors(), &colors());
+        let page = page("Plan & co", "---\ntags: [a]\n---\n# Weekly plan\n\n- [x] done\n", None, &|_| None, &|_| None, &colors(), &colors());
         assert!(page.contains("<title>Plan &amp; co</title>"));
         assert!(page.contains("<h1>Weekly plan</h1>"));
         assert!(page.contains("checkbox"));
@@ -130,11 +212,22 @@ mod tests {
     }
 
     #[test]
+    fn diagrams_are_drawn_where_they_can_be_and_formulas_written_out() {
+        let note = "```mermaid\ngraph TD; A-->B\n```\n\n```mermaid\npie\n```\n\n$x^2$";
+        let page = page("x", note, None, &|_| None, &|source| source.starts_with("graph").then(|| "<figure>drawn</figure>".to_owned()), &colors(), &colors());
+        assert!(page.contains("<figure>drawn</figure>"));
+        assert!(!page.contains("graph TD"));
+        assert!(page.contains("<code class=\"language-mermaid\">pie"));
+        assert!(page.contains("<span class=\"math\">"));
+        assert!(page.contains("<sup>2</sup>"));
+    }
+
+    #[test]
     fn a_picture_beside_the_note_is_carried_in_the_page() {
         let dir = std::env::temp_dir().join(format!("nevis-html-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("dot.png"), b"PNG").unwrap();
-        let page = page("x", "![a dot](dot.png) ![web](https://example.com/a.png)", Some(&dir), &|_| None, &colors(), &colors());
+        let page = page("x", "![a dot](dot.png) ![web](https://example.com/a.png)", Some(&dir), &|_| None, &|_| None, &colors(), &colors());
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(page.contains("src=\"data:image/png;base64,UE5H\""));
         assert!(page.contains("src=\"https://example.com/a.png\""));
