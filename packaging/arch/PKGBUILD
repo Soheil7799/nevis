@@ -39,6 +39,7 @@ package() {
   install -Dm755 "$srcdir/target/release/nevis-app" "$pkgdir/usr/bin/nevis-app"
   sed 's|@BINDIR@|/usr/bin|' "$_tree/data/dev.shirvani.Nevis.desktop.in" |
     install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/dev.shirvani.Nevis.desktop"
+  install -Dm644 "$_tree/data/dev.shirvani.Nevis.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/dev.shirvani.Nevis.svg"
   sed 's|@BINDIR@|/usr/bin|' "$_tree/data/nevis.service.in" |
     install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/nevis.service"
   install -Dm644 "$_tree/README.md" "$pkgdir/usr/share/doc/nevis/README.md"
