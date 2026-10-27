@@ -1,0 +1,16 @@
+# Rosé Pine, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Rosé Pine
+
+background = #191724
+foreground = #e0def4
+surface    = #1f1d2e
+accent     = #ebbcba
+comment    = #6e6a86
+red        = #eb6f92
+orange     = #ebbcba
+yellow     = #f6c177
+green      = #9ccfd8
+cyan       = #9ccfd8
+blue       = #31748f
+purple     = #c4a7e7

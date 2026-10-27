@@ -103,9 +103,24 @@ impl Window {
             .child(&strip)
             .visible(false)
             .build();
-        let pages = gtk::Stack::builder().vexpand(true).hexpand(true).hhomogeneous(false).vhomogeneous(false).build();
-        let tabbed = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        tabbed.append(&bar_scroller);
+        // The page: a rounded panel in the window's frame, its corners cutting what is in it.
+        let pages = gtk::Stack::builder()
+            .vexpand(true)
+            .hexpand(true)
+            .hhomogeneous(false)
+            .vhomogeneous(false)
+            .overflow(gtk::Overflow::Hidden)
+            .css_classes(["nevis-island"])
+            .build();
+        bar_scroller.set_hexpand(true);
+        // At the end of the tab bar, outside what scrolls: a gear for Settings, shown with it.
+        let gear = gear();
+        bar_scroller.bind_property("visible", &gear, "visible").sync_create().build();
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        top.append(&bar_scroller);
+        top.append(&gear);
+        let tabbed = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["nevis-frame"]).build();
+        tabbed.append(&top);
         tabbed.append(&pages);
         let paned = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -113,6 +128,7 @@ impl Window {
             .resize_start_child(false)
             .shrink_start_child(false)
             .position(240)
+            .css_classes(["nevis-main"])
             .build();
         let overlay = gtk::Overlay::builder().child(&paned).build();
         let size = window_size::recall();
@@ -518,6 +534,7 @@ impl Window {
         self.toggle("wrap", settings::get().wrap, |_, on| settings::change(|s| s.wrap = on));
         self.toggle("line-numbers", settings::get().line_numbers, |_, on| settings::change(|s| s.line_numbers = on));
         self.action("settings", |w| w.toggle_settings());
+        self.action("about", |w| w.settings_page().show_page("about"));
         self.action("shortcuts", |w| w.toggle_help());
         self.action("sidebar", |w| w.toggle_sidebar());
         self.toggle("focus", false, |w, on| w.set_focus_mode(on));
@@ -911,18 +928,14 @@ impl Window {
         }
     }
 
-    /// Opens (or closes) the Settings page.
+    /// This window's Settings, made the first time they are asked for.
+    fn settings_page(&self) -> Rc<SettingsPage> {
+        self.settings.borrow_mut().get_or_insert_with(|| SettingsPage::new(&self.window)).clone()
+    }
+
+    /// Opens (or closes) the Settings window.
     fn toggle_settings(self: &Rc<Self>) {
-        let existing = self.settings.borrow().clone();
-        let page = match existing {
-            Some(page) => page,
-            None => {
-                let page = SettingsPage::new();
-                self.add_popup(&page.widget);
-                *self.settings.borrow_mut() = Some(page.clone());
-                page
-            }
-        };
+        let page = self.settings_page();
         if page.is_open() {
             page.hide();
         } else {
@@ -1783,7 +1796,7 @@ fn build_menu() -> gio::Menu {
         ("Print…", "win.print"),
     ]));
     menu.append_section(None, &section(&[("Find…", "win.find"), ("Reading View", "win.reading"), ("Side by Side", "win.side-by-side")]));
-    menu.append_section(None, &section(&[("Settings…", "win.settings"), ("Keyboard Shortcuts", "win.shortcuts")]));
+    menu.append_section(None, &section(&[("Settings…", "win.settings"), ("Keyboard Shortcuts", "win.shortcuts"), ("About nevis", "win.about")]));
     menu
 }
 
@@ -1833,4 +1846,38 @@ mod window_size {
         let maximized = fields.next()?.parse().ok()?;
         (width > 0 && height > 0).then_some(Size { width, height, maximized })
     }
+}
+
+/// The Settings gear: drawn, not an icon (icons cost ~0.3 s to load the first time, and "⚙"
+/// may come out as a colour emoji), in the text's colour as the "+" beside it.
+fn gear() -> gtk::Box {
+    let drawing = gtk::DrawingArea::builder().content_width(16).content_height(16).valign(gtk::Align::Center).build();
+    drawing.set_draw_func(|area, cr, width, height| {
+        let c = area.color();
+        cr.set_source_rgba(f64::from(c.red()), f64::from(c.green()), f64::from(c.blue()), f64::from(c.alpha()));
+        let (x, y) = (f64::from(width) / 2.0, f64::from(height) / 2.0);
+        // Eight teeth around a ring.
+        cr.set_line_width(2.6);
+        for tooth in 0..8 {
+            let angle = f64::from(tooth) * std::f64::consts::FRAC_PI_4;
+            let (dx, dy) = (angle.cos(), angle.sin());
+            cr.move_to(x + 4.0 * dx, y + 4.0 * dy);
+            cr.line_to(x + 7.3 * dx, y + 7.3 * dy);
+        }
+        let _ = cr.stroke();
+        cr.set_line_width(2.4);
+        cr.arc(x, y, 4.3, 0.0, std::f64::consts::TAU);
+        let _ = cr.stroke();
+    });
+    let gear = gtk::Box::builder().css_classes(["nevis-gear"]).tooltip_text("Settings (Ctrl+,)").build();
+    gear.append(&drawing);
+    gear.update_property(&[gtk::accessible::Property::Label("Settings")]);
+    let click = gtk::GestureClick::new();
+    click.connect_released(|click, _, _, _| {
+        if let Some(widget) = click.widget() {
+            let _ = widget.activate_action("win.settings", None);
+        }
+    });
+    gear.add_controller(click);
+    gear
 }

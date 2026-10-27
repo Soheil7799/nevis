@@ -1,0 +1,16 @@
+# Adwaita Light, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Adwaita Light
+
+background = #ffffff
+foreground = #323232
+surface    = #f6f5f4
+accent     = #3584e4
+comment    = #77767b
+red        = #c01c28
+orange     = #c64600
+yellow     = #9c6e03
+green      = #26a269
+cyan       = #1f8a8a
+blue       = #1c71d8
+purple     = #813d9c

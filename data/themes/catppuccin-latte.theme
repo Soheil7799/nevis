@@ -1,0 +1,16 @@
+# Catppuccin Latte, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Catppuccin Latte
+
+background = #eff1f5
+foreground = #4c4f69
+surface    = #e6e9ef
+accent     = #8839ef
+comment    = #8c8fa1
+red        = #d20f39
+orange     = #fe640b
+yellow     = #df8e1d
+green      = #40a02b
+cyan       = #179299
+blue       = #1e66f5
+purple     = #8839ef

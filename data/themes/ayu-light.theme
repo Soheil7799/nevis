@@ -1,0 +1,16 @@
+# Ayu Light, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Ayu Light
+
+background = #fcfcfc
+foreground = #5c6166
+surface    = #f3f4f5
+accent     = #ffaa33
+comment    = #8a9199
+red        = #f07171
+orange     = #fa8d3e
+yellow     = #f2ae49
+green      = #86b300
+cyan       = #4cbf99
+blue       = #399ee6
+purple     = #a37acc

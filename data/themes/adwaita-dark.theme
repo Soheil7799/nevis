@@ -1,0 +1,16 @@
+# Adwaita Dark, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Adwaita Dark
+
+background = #1e1e1e
+foreground = #ffffff
+surface    = #303030
+accent     = #78aeed
+comment    = #9a9996
+red        = #ff7b63
+orange     = #ffa348
+yellow     = #f8e45c
+green      = #8ff0a4
+cyan       = #93ddc2
+blue       = #99c1f1
+purple     = #dc8add

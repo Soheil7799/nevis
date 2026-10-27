@@ -1,0 +1,16 @@
+# Kanagawa, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Kanagawa
+
+background = #1f1f28
+foreground = #dcd7ba
+surface    = #2a2a37
+accent     = #7e9cd8
+comment    = #727169
+red        = #e46876
+orange     = #ffa066
+yellow     = #e6c384
+green      = #98bb6c
+cyan       = #7aa89f
+blue       = #7e9cd8
+purple     = #957fb8

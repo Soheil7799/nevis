@@ -281,6 +281,12 @@ fn press(view: &gtk::TextView, key: &str) {
 }
 
 fn snapshot(window: &gtk::ApplicationWindow, path: &std::ffi::OsStr) -> Result<(), String> {
+    // A window open over it (Settings) is what the actions were for: that one.
+    let over = gtk::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Window>().ok())
+        .find(|w| w.is_visible() && w.transient_for().as_ref() == Some(window.upcast_ref()));
+    let window = over.as_ref().unwrap_or(window.upcast_ref::<gtk::Window>());
     let content = window.child().ok_or("window has no content")?;
     // A window the compositor isn't drawing (another workspace) has its layout pending
     // forever: lay it out here, at its last size or else the size it opened at.

@@ -25,7 +25,7 @@ pub struct Prompt {
 
 impl Prompt {
     pub fn new() -> Rc<Self> {
-        let title = gtk::Label::builder().xalign(0.0).css_classes(["nevis-help-section"]).build();
+        let title = gtk::Label::builder().xalign(0.0).css_classes(["nevis-prompt-title"]).build();
         let entry = gtk::Entry::new();
         let error = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["nevis-prompt-error"]).build();
         let (widget, card) = popup::card(420);

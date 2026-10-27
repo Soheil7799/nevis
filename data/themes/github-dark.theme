@@ -1,0 +1,16 @@
+# GitHub Dark, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = GitHub Dark
+
+background = #0d1117
+foreground = #e6edf3
+surface    = #161b22
+accent     = #58a6ff
+comment    = #8b949e
+red        = #ff7b72
+orange     = #ffa657
+yellow     = #e3b341
+green      = #7ee787
+cyan       = #a5d6ff
+blue       = #79c0ff
+purple     = #d2a8ff

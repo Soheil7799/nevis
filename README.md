@@ -14,7 +14,8 @@ I wanted something to edit text without opening a heavy application like VS Code
 - Folder sidebar, quick open, search
 - Persian and right-to-left text
 - Syntax highlighting
-- Themes following your GTK colours
+- Themes following your GTK colours, 21 built in, and your own (or matugen's) in
+  `~/.config/nevis/themes` ([format](data/themes/README.md))
 
 ## Build and install
 
@@ -44,4 +45,5 @@ nevis               # nevis as you left it
 ```
 
 Ctrl+E switches a Markdown note between the rendered view and its source. Ctrl+Shift+P finds
-any command by name, F1 lists the keyboard shortcuts and Ctrl+, opens the settings.
+any command by name, F1 lists the keyboard shortcuts, and Ctrl+, (or the gear at the end of the
+tab bar) opens the settings: appearance, writing, windows and tabs, and About.

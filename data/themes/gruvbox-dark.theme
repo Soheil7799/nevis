@@ -1,0 +1,16 @@
+# Gruvbox Dark, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Gruvbox Dark
+
+background = #282828
+foreground = #ebdbb2
+surface    = #32302f
+accent     = #fabd2f
+comment    = #928374
+red        = #fb4934
+orange     = #fe8019
+yellow     = #fabd2f
+green      = #b8bb26
+cyan       = #8ec07c
+blue       = #83a598
+purple     = #d3869b

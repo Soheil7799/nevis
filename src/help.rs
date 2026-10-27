@@ -63,6 +63,7 @@ const RIGHT: &[(&str, &[Row])] = &[
         row("Folder sidebar", "win.sidebar", ""),
         row("Focus mode: only the paragraph you're writing", "win.focus", ""),
         row("Settings (theme, text size…)", "win.settings", ""),
+        row("About nevis", "win.about", ""),
         row("Line numbers", "win.line-numbers", ""),
         row("Word wrap", "win.wrap", ""),
         row("Larger text", "win.zoom-in", "Ctrl+scroll"),
@@ -179,7 +180,15 @@ fn column(app: &gtk::Application, sections: &[(&str, &[Row])]) -> gtk::Grid {
         line += 1;
         for row in *rows {
             let what = gtk::Label::builder().label(row.what).xalign(0.0).build();
-            let keys = gtk::Label::builder().label(keys(app, row)).xalign(0.0).css_classes(["nevis-help-keys"]).build();
+            // A keycap as wide as its keys; none for a command without any.
+            let keys = keys(app, row);
+            let keys = gtk::Label::builder()
+                .visible(!keys.is_empty())
+                .label(keys)
+                .halign(gtk::Align::Start)
+                .valign(gtk::Align::Center)
+                .css_classes(["nevis-help-keys"])
+                .build();
             grid.attach(&what, 0, line, 1, 1);
             grid.attach(&keys, 1, line, 1, 1);
             line += 1;

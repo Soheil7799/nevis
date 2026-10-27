@@ -1,0 +1,16 @@
+# Ayu Mirage, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Ayu Mirage
+
+background = #1f2430
+foreground = #cccac2
+surface    = #1a1f29
+accent     = #ffcc66
+comment    = #707a8c
+red        = #f28779
+orange     = #ffad66
+yellow     = #ffd173
+green      = #bae67e
+cyan       = #95e6cb
+blue       = #73d0ff
+purple     = #dfbfff

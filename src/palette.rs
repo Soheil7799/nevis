@@ -151,7 +151,12 @@ impl Palette {
             let command = &commands[index];
             let line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
             let what = gtk::Label::builder().label(&command.what).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
-            let keys = gtk::Label::builder().label(&command.keys).xalign(1.0).css_classes(["nevis-help-keys"]).build();
+            let keys = gtk::Label::builder()
+                .label(&command.keys)
+                .visible(!command.keys.is_empty())
+                .valign(gtk::Align::Center)
+                .css_classes(["nevis-help-keys"])
+                .build();
             line.append(&what);
             line.append(&keys);
             self.list.append(&line);

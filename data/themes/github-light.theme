@@ -1,0 +1,16 @@
+# GitHub Light, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = GitHub Light
+
+background = #ffffff
+foreground = #1f2328
+surface    = #f6f8fa
+accent     = #0969da
+comment    = #6e7781
+red        = #cf222e
+orange     = #bc4c00
+yellow     = #9a6700
+green      = #116329
+cyan       = #0a3069
+blue       = #0550ae
+purple     = #8250df

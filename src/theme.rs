@@ -114,7 +114,7 @@ pub fn init() {
     apply_font();
 
     let choice = std::fs::read_to_string(choice_file()).map(|text| text.trim().to_owned()).unwrap_or_default();
-    let known = choice == SYSTEM || palettes::built_in().iter().any(|p| p.id == choice);
+    let known = choice == SYSTEM || find(&choice).is_some();
     CHOICE.with_borrow_mut(|current| *current = if known { choice } else { SYSTEM.to_owned() });
     apply(false);
     if let Some(settings) = gtk::Settings::default() {
@@ -174,7 +174,7 @@ pub fn choose(id: &str, keep: bool) {
 
 /// Shows `id`'s palette everywhere; `keep` remembers it for next time too.
 fn show(id: &str, keep: bool) {
-    CHOICE.with_borrow_mut(|choice| *choice = id.to_owned());
+    let before = CHOICE.with_borrow_mut(|choice| std::mem::replace(choice, id.to_owned()));
     if keep {
         let file = choice_file();
         if let Some(dir) = file.parent() {
@@ -182,7 +182,11 @@ fn show(id: &str, keep: bool) {
         }
         let _ = std::fs::write(file, format!("{id}\n"));
     }
-    apply(true);
+    // Another palette in the same colours (a copy of a built-in one) repaints nothing, but
+    // Settings still marks the one chosen.
+    if !apply(true) && before != id {
+        tell();
+    }
 }
 
 /// The other version, light or dark, of the palette `id`.
@@ -205,7 +209,7 @@ pub fn set_dark(dark: bool) {
     let leaving = choice();
     change_appearance(|a| *(if dark { &mut a.light } else { &mut a.dark }) = Some(leaving));
     let remembered = if dark { appearance().dark } else { appearance().light };
-    let known = |id: &String| id == SYSTEM || palettes::built_in().iter().any(|p| &p.id == id);
+    let known = |id: &String| id == SYSTEM || find(id).is_some();
     let fallback = if dark { "adwaita-dark" } else { "adwaita-light" };
     let id = remembered.filter(known).or_else(|| partner(&choice()).map(str::to_owned)).unwrap_or_else(|| fallback.to_owned());
     show(&id, true);
@@ -284,9 +288,46 @@ fn appearance_text(a: &Appearance) -> String {
     text
 }
 
-/// Every palette that can be chosen: System first, then the built-in ones.
+/// Every palette that can be chosen: System first, then the user's own, then the built-in
+/// ones (a user's theme of the same id stands in for a built-in one).
 pub fn choices() -> Vec<Palette> {
-    std::iter::once(palette(SYSTEM)).chain(palettes::built_in()).collect()
+    let mut own = user_themes();
+    let built_in: Vec<Palette> = palettes::built_in().into_iter().filter(|p| !own.iter().any(|o| o.id == p.id)).collect();
+    // A copy of a built-in theme still named as it ("Nord") says which file it is.
+    for theme in &mut own {
+        if built_in.iter().any(|p| p.name == theme.name) {
+            theme.name = format!("{} ({})", theme.name, theme.id);
+        }
+    }
+    std::iter::once(palette(SYSTEM)).chain(own).chain(built_in).collect()
+}
+
+/// The user's own themes: `~/.config/nevis/themes/<id>.theme`, in the format of the built-in
+/// ones (`data/themes`), so that a generator (matugen) can write one.
+pub fn themes_dir() -> PathBuf {
+    glib::user_config_dir().join("nevis").join("themes")
+}
+
+/// The palette `id` names, the user's own before a built-in one; none for System.
+fn find(id: &str) -> Option<Palette> {
+    user_theme(id).or_else(|| palettes::built_in().into_iter().find(|p| p.id == id))
+}
+
+fn user_theme(id: &str) -> Option<Palette> {
+    if id == SYSTEM || id.is_empty() || id.contains(['/', '\\']) {
+        return None;
+    }
+    palettes::read(id, &std::fs::read_to_string(themes_dir().join(format!("{id}.theme"))).ok()?)
+}
+
+/// Every theme in the user's folder that reads, by file name.
+fn user_themes() -> Vec<Palette> {
+    let Ok(entries) = std::fs::read_dir(themes_dir()) else { return Vec::new() };
+    let mut ids: Vec<String> = entries
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.strip_suffix(".theme").map(str::to_owned))
+        .collect();
+    ids.sort();
+    ids.iter().filter_map(|id| user_theme(id)).collect()
 }
 
 /// Runs `f` after every change of colours or fonts, for as long as it returns true.
@@ -297,7 +338,7 @@ pub fn on_change(f: impl Fn() -> bool + 'static) {
 /// The palette `id` names; System is the GTK theme's, or Adwaita's when it names no colours.
 fn palette(id: &str) -> Palette {
     if id != SYSTEM
-        && let Some(palette) = palettes::built_in().into_iter().find(|p| p.id == id)
+        && let Some(palette) = find(id)
     {
         return palette;
     }
@@ -312,7 +353,8 @@ fn palette(id: &str) -> Palette {
 }
 
 /// Works the colours out again and repaints; `tell` lets open windows know.
-fn apply(tell: bool) {
+/// Whether the colours changed (and, with `tell`, windows were told).
+fn apply(tell: bool) -> bool {
     let choice = choice();
     let mut palette = palette(&choice);
     if let Some(color) = appearance().text_color {
@@ -325,10 +367,11 @@ fn apply(tell: bool) {
     CHROME_CSS.with(|css| css.load_from_string(&chrome_css(&colors)));
     let widgets = if choice == SYSTEM { String::new() } else { widget_css(&colors) };
     WIDGET_CSS.with(|css| css.load_from_string(&widgets));
-    watch_gtk(choice == SYSTEM);
+    watch(&choice);
     if tell && changed {
         self::tell();
     }
+    changed
 }
 
 /// Lets open windows know the colours or fonts changed, and drops the listeners that are done.
@@ -352,20 +395,46 @@ fn gtk_colors() -> (Named, Vec<PathBuf>) {
     (named, files)
 }
 
-/// While System is chosen, repaint whenever the GTK stylesheets change.
-fn watch_gtk(on: bool) {
-    let files = if on { gtk_colors().1 } else { Vec::new() };
-    let monitors = files
-        .iter()
-        .filter_map(|path| gio::File::for_path(path).monitor_file(gio::FileMonitorFlags::NONE, None::<&gio::Cancellable>).ok())
-        .inspect(|monitor| {
-            monitor.connect_changed(|_, _, _, event| {
-                if matches!(event, gio::FileMonitorEvent::ChangesDoneHint | gio::FileMonitorEvent::Created | gio::FileMonitorEvent::Deleted) {
-                    schedule_reload();
-                }
-            });
-        })
-        .collect();
+/// Repaints when what the colours come from changes: the GTK stylesheets while System is
+/// chosen, the theme's file while one of the user's own is.
+fn watch(choice: &str) {
+    let changed = |event: gio::FileMonitorEvent| {
+        matches!(
+            event,
+            gio::FileMonitorEvent::ChangesDoneHint | gio::FileMonitorEvent::Created | gio::FileMonitorEvent::Deleted | gio::FileMonitorEvent::MovedIn
+        )
+    };
+    let monitors = if choice == SYSTEM {
+        gtk_colors()
+            .1
+            .iter()
+            .filter_map(|path| gio::File::for_path(path).monitor_file(gio::FileMonitorFlags::NONE, None::<&gio::Cancellable>).ok())
+            .inspect(|monitor| {
+                monitor.connect_changed(move |_, _, _, event| {
+                    if changed(event) {
+                        schedule_reload();
+                    }
+                });
+            })
+            .collect()
+    } else if user_theme(choice).is_some() {
+        // The folder, not the file: generators write a new file and rename it over the old.
+        let name = format!("{choice}.theme");
+        let folder = gio::File::for_path(themes_dir()).monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, None::<&gio::Cancellable>).ok();
+        folder
+            .inspect(|monitor| {
+                monitor.connect_changed(move |_, file, other, event| {
+                    let named = |f: &gio::File| f.basename().is_some_and(|base| base.as_os_str() == name.as_str());
+                    if (named(file) || other.is_some_and(named)) && (changed(event) || event == gio::FileMonitorEvent::Renamed) {
+                        schedule_reload();
+                    }
+                });
+            })
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
     MONITORS.with_borrow_mut(|old| *old = monitors);
 }
 
@@ -376,9 +445,8 @@ fn schedule_reload() {
     }
     glib::timeout_add_local_once(Duration::from_millis(300), || {
         RELOAD_PENDING.set(false);
-        if choice() == SYSTEM {
-            apply(true);
-        }
+        // A built-in palette comes out the same, and then no one is told.
+        apply(true);
     });
 }
 
@@ -496,104 +564,150 @@ fn scheme_xml(c: &Colors) -> String {
     )
 }
 
-/// nevis's own widgets.
+/// nevis's own widgets, in loom's terms: the page a rounded island in the surface's frame, soft
+/// fills instead of lines, one set of corners (6 rows, 8 controls, 10 cards, 12 panels, 999
+/// pills), the accent kept for what is chosen or focused. Type steps: 0.8 labels, 0.9
+/// secondary, 1 body, 1.2 titles.
 fn chrome_css(c: &Colors) -> String {
     let h = |color: Rgb| color.to_hex();
-    let (surface, border, accent, text, dim) = (h(c.surface), h(c.border), h(c.accent), h(c.text), h(c.dim));
-    let (error, background) = (h(c.error), h(c.background));
+    let (surface, accent, text, background) = (h(c.surface), h(c.accent), h(c.text), h(c.background));
+    let error = h(c.error);
+    // Secondary text: the text at about two thirds, yet 4.5:1 on the surface and the page.
+    let muted = h(c.text.mix(c.surface, 0.32).readable_on(c.surface, 4.5).readable_on(c.background, 4.5));
     let on_accent = h(if c.accent.contrast(Rgb::BLACK) > c.accent.contrast(Rgb::WHITE) { Rgb::BLACK } else { Rgb::WHITE });
     format!(
-        ".nevis-find {{ padding: 6px 10px; background: {surface}; border-bottom: 1px solid alpha({border}, 0.6); }}
+        "/* The frame and the page: the window in the surface colour, the page a rounded panel in it. */
+         .nevis-frame {{ background: {surface}; }}
+         .nevis-island {{ background: {background}; border-radius: 12px; margin: 6px; }}
+         /* The views in the page's colour all over: GTK paints a view's margins (the space left
+            of the line numbers, with centred text) in the GTK theme's colour, not the text's. */
+         textview.nevis-editor, textview.nevis-read, textview.nevis-editor > border, textview.nevis-read > border {{
+             background-color: {background}; }}
+         paned.nevis-main > separator {{ background: none; background-color: {surface}; color: transparent; box-shadow: none; border: none;
+             border-image: none; outline: none; -gtk-icon-source: none; min-width: 1px; min-height: 1px; }}
+         paned > separator {{ background: alpha({text}, 0.07); min-width: 1px; }}
+         /* Keyboard focus is always visible. */
+         .nevis-sidebar > row:focus-visible, .nevis-switcher-list > row:focus-visible, .nevis-settings-button:focus-visible,
+         .nevis-stepper > button:focus-visible, .nevis-tab:focus-visible, .nevis-prefs-close:focus-visible {{ outline: 2px solid alpha({accent}, 0.7); outline-offset: -2px; }}
+         .nevis-switch:focus-visible, .nevis-segments > button:focus-visible, .nevis-theme-tile:focus-visible {{
+             outline: 2px solid alpha({accent}, 0.7); outline-offset: 2px; }}
+
+         .nevis-find {{ padding: 6px 10px; background: alpha({text}, 0.035); border-bottom: 1px solid alpha({text}, 0.07); }}
          .nevis-table {{ border: none; background: none; }}
          .nevis-table-head, .nevis-table-cell {{ padding: 7px 22px 7px 0; }}
-         .nevis-table-head {{ color: {dim}; border-bottom: 1px solid alpha({dim}, 0.5); }}
-         .nevis-table-cell {{ border-bottom: 1px solid {border}; }}
+         .nevis-table-head {{ color: {muted}; border-bottom: 1px solid alpha({text}, 0.2); }}
+         .nevis-table-cell {{ border-bottom: 1px solid alpha({text}, 0.07); }}
          .nevis-table-cell.last {{ border-bottom: none; }}
+
+         /* The sidebar: rows in the frame, the chosen one tinted. */
          .nevis-sidebar, .nevis-sidebar-pane {{ background: {surface}; }}
          /* No padding above and below a row: its indent guides join up with the next row's. */
-         .nevis-sidebar > row {{ padding: 0 10px 0 4px; border-radius: 6px; margin: 0 6px; color: {text}; }}
+         .nevis-sidebar > row {{ padding: 0 10px 0 4px; border-radius: 6px; margin: 0 8px; color: {text}; }}
          .nevis-sidebar > row:hover {{ background: alpha({text}, 0.05); }}
          .nevis-sidebar > row:selected {{ background: alpha({accent}, 0.12); color: {text}; }}
          /* The user's GTK stylesheet may colour labels in rows itself; these follow the row. */
          .nevis-sidebar-name {{ padding: 4px 0; color: inherit; }}
-         .nevis-sidebar-arrow, .nevis-file-icon {{ color: {dim}; }}
+         .nevis-sidebar-arrow, .nevis-file-icon {{ color: {muted}; }}
          .nevis-file-icon.folder, .nevis-sidebar > row:selected .nevis-file-icon {{ color: {accent}; }}
-         .nevis-sidebar-header {{ padding: 10px 8px 6px 20px; }}
-         .nevis-sidebar-title {{ font-weight: 600; }}
-         paned > separator {{ background: {border}; min-width: 1px; }}
+         .nevis-sidebar-header {{ padding: 12px 8px 6px 18px; }}
+         .nevis-sidebar-title {{ color: {muted}; font-size: 0.8em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }}
+
+         /* Cards over the window: a soft edge and a shadow, no hard line. */
          .nevis-help-backdrop {{ background: alpha(black, 0.3); }}
-         .nevis-switcher {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 14px;
-                           padding: 8px; box-shadow: 0 1px 2px alpha(black, 0.2), 0 16px 48px alpha(black, 0.32); }}
+         .nevis-switcher {{ background: {surface}; color: {text}; border: 1px solid alpha({text}, 0.12); border-radius: 12px;
+                           padding: 8px; box-shadow: 0 6px 20px alpha(black, 0.35); }}
          /* The search field is the card's top line, not a box in it. */
          .nevis-switcher > entry {{ background: none; border: none; box-shadow: none; outline: none; border-radius: 0;
-             padding: 6px 8px 10px 8px; font-size: 1.05em; border-bottom: 1px solid {border}; margin-bottom: 2px; }}
+             padding: 6px 8px 10px 8px; font-size: 1.05em; border-bottom: 1px solid alpha({text}, 0.07); margin-bottom: 2px; }}
          .nevis-switcher-list {{ background: transparent; }}
          .nevis-preview, .nevis-preview > text {{ background: alpha({text}, 0.04); border-radius: 8px; font-size: 0.9em; }}
          .nevis-outline-top {{ font-weight: 600; }}
-         .nevis-complete {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 4px;
-             box-shadow: 0 6px 18px alpha(black, 0.28); }}
+         .nevis-complete {{ background: {surface}; color: {text}; border: 1px solid alpha({text}, 0.12); border-radius: 10px; padding: 4px;
+             box-shadow: 0 6px 20px alpha(black, 0.35); }}
          .nevis-complete-list {{ background: transparent; }}
-         .nevis-complete-list > row {{ padding: 4px 8px; border-radius: 5px; min-height: 0; }}
-         .nevis-complete-list > row:selected {{ background: alpha({text}, 0.08); color: {text}; }}
-         .nevis-outline-empty {{ color: {dim}; padding: 6px 2px; }}
-         .nevis-toast {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 999px; padding: 6px 16px;
-             box-shadow: 0 6px 18px alpha(black, 0.28); }}
+         .nevis-complete-list > row {{ padding: 4px 8px; border-radius: 6px; min-height: 0; }}
+         .nevis-outline-empty {{ color: {muted}; padding: 6px 2px; }}
+         .nevis-toast {{ background: {surface}; color: {text}; border: 1px solid alpha({text}, 0.12); border-radius: 10px; padding: 6px 16px;
+             box-shadow: 0 6px 20px alpha(black, 0.35); }}
          /* The user's GTK stylesheet may colour labels in rows itself; these follow the row. */
          .nevis-switcher-list > row, .nevis-complete-list > row {{ color: {text}; }}
          .nevis-switcher-list > row label:not(.nevis-help-keys), .nevis-complete-list > row label {{ color: inherit; }}
-         .nevis-switcher-list > row {{ padding: 6px 8px; border-radius: 8px; }}
+         .nevis-switcher-list > row {{ padding: 7px 10px; border-radius: 8px; }}
          /* The user's GTK stylesheet may paint list rows in its own (dark) colours: here they
             are the card's, so a light palette's list stays readable. */
          .nevis-switcher-list > row:not(:selected), .nevis-complete-list > row:not(:selected) {{ background: transparent; }}
          .nevis-switcher-list > row:hover:not(:selected), .nevis-complete-list > row:hover:not(:selected) {{ background: alpha({text}, 0.05); }}
-         .nevis-themes, .nevis-themes > flowboxchild {{ background: none; padding: 0; }}
-         .nevis-theme-tile {{ padding: 6px 6px 8px 6px; border-radius: 14px; border: none; box-shadow: none; background: none;
-             transition: background-color 120ms ease, box-shadow 120ms ease; }}
-         .nevis-theme-tile:hover {{ background: alpha({text}, 0.06); }}
-         .nevis-theme-tile.on {{ background: alpha({accent}, 0.14); box-shadow: inset 0 0 0 2px {accent}; }}
-         .nevis-theme-tile:focus-visible {{ outline: 2px solid alpha({accent}, 0.6); outline-offset: 1px; }}
-         .nevis-theme-name {{ color: {dim}; font-size: 0.88em; }}
-         .nevis-theme-tile.on .nevis-theme-name {{ color: {text}; font-weight: 600; }}
-         .nevis-switcher-list > row:selected {{ background: alpha({text}, 0.08); color: {text}; }}
+         .nevis-switcher-list > row:selected, .nevis-complete-list > row:selected {{ background: alpha({accent}, 0.12); color: {text}; }}
+         .nevis-prompt-title {{ font-weight: 600; padding: 2px 2px 0 2px; }}
          .nevis-prompt-error {{ color: {error}; }}
-         .nevis-search-status {{ color: {dim}; font-size: smaller; padding: 0 4px; }}
-         .nevis-search-place {{ font-size: smaller; }}
-         .nevis-help {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 14px;
-                       padding: 20px 28px; box-shadow: 0 1px 2px alpha(black, 0.2), 0 16px 48px alpha(black, 0.32); }}
-         .nevis-help-title {{ font-size: 1.3em; font-weight: bold; }}
-         .nevis-help-section {{ color: {dim}; font-weight: 600; font-size: 0.85em; }}
-         .nevis-help-keys {{ color: {dim}; font-size: 0.9em; font-feature-settings: \"tnum\"; }}
-         /* The tab bar and the sidebar are the window's frame, in the surface colour; the tab in
-            front is cut from the page, in its colour, so it reads as the page's own. */
-         .nevis-tabbar {{ background: {surface}; padding: 3px 8px 0 8px; box-shadow: inset 0 -1px alpha({border}, 0.8); }}
-         .nevis-tab {{ padding: 0 4px 0 12px; margin-right: 2px; border-radius: 8px 8px 0 0; color: {dim};
+         .nevis-search-status {{ color: {muted}; font-size: 0.9em; padding: 0 4px; }}
+         .nevis-search-place {{ font-size: 0.9em; }}
+         .nevis-help {{ background: {surface}; color: {text}; border: 1px solid alpha({text}, 0.12); border-radius: 12px;
+                       padding: 24px 28px; box-shadow: 0 6px 20px alpha(black, 0.35); }}
+         .nevis-help-title {{ font-size: 1.2em; font-weight: 700; }}
+         .nevis-help-section {{ color: {accent}; font-size: 0.8em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }}
+         /* Keys as keycaps. */
+         .nevis-help-keys {{ color: {muted}; font-size: 0.8em; font-feature-settings: \"tnum\"; padding: 1px 7px; border-radius: 6px;
+             background: alpha({text}, 0.08); border-bottom: 1px solid alpha({text}, 0.14); }}
+
+         /* Tabs: chips in the frame, the one in front filled. */
+         .nevis-tabbar {{ background: {surface}; padding: 6px 6px 0 6px; }}
+         .nevis-tab {{ padding: 0 4px 0 10px; margin-right: 4px; border-radius: 8px; color: {muted};
              transition: color 120ms ease, background-color 120ms ease; }}
-         .nevis-tab > label {{ padding: 4px 0; }}
+         .nevis-tab > label {{ padding: 5px 0; }}
          .nevis-tab:hover {{ color: {text}; background-color: alpha({text}, 0.05); }}
-         .nevis-tab.current {{ color: {text}; background-color: {background}; box-shadow: 0 1px {background}, inset 0 1px alpha({border}, 0.5); }}
-         .nevis-tab.current > .nevis-tab-title {{ font-weight: 500; }}
-         .nevis-tab > .nevis-tab-number {{ margin-right: 6px; color: {accent}; font-weight: 600; }}
-         .nevis-tab-close {{ min-width: 10px; padding: 0 6px; margin: 3px 0; color: transparent; border-radius: 999px;
+         .nevis-tab.current {{ color: {text}; background-color: alpha({text}, 0.12); }}
+         .nevis-tab.current > .nevis-tab-title {{ font-weight: 600; }}
+         .nevis-tab > .nevis-tab-number {{ margin-right: 6px; color: {muted}; font-size: 0.8em; }}
+         .nevis-tab-close {{ min-width: 10px; padding: 0 6px; margin: 4px 0; color: transparent; border-radius: 6px;
              transition: color 120ms ease, background-color 120ms ease; }}
-         .nevis-tab:hover > .nevis-tab-close, .nevis-tab.current > .nevis-tab-close {{ color: {dim}; }}
+         .nevis-tab:hover > .nevis-tab-close, .nevis-tab.current > .nevis-tab-close {{ color: {muted}; }}
          .nevis-tab > .nevis-tab-close.unsaved {{ color: {accent}; font-size: 0.7em; }}
          .nevis-tab > .nevis-tab-close:hover {{ color: {text}; background-color: alpha({text}, 0.1); }}
-         .nevis-tab-new, .nevis-sidebar-new {{ margin: 2px 0 2px 6px; padding: 0 10px; color: {dim}; border-radius: 999px;
+         .nevis-tab-new, .nevis-sidebar-new {{ margin: 2px 0 2px 2px; padding: 0 10px; color: {muted}; border-radius: 8px;
              transition: color 120ms ease, background-color 120ms ease; }}
          .nevis-tab-new:hover, .nevis-sidebar-new:hover {{ color: {text}; background-color: alpha({text}, 0.08); }}
-         /* No padding on the right: the list scrolls right up to the card's edge, so its
-            scrollbar sits in the margin instead of over the switches (the rows keep their own). */
-         .nevis-settings {{ padding: 22px 0 16px 28px; }}
-         .nevis-settings-title {{ font-size: 1.2em; font-weight: 600; margin-bottom: 2px; }}
-         .nevis-settings-section {{ color: {dim}; font-size: 0.85em; font-weight: 600; margin-top: 22px; margin-bottom: 2px; }}
-         .nevis-settings-row {{ padding: 8px 0; }}
-         /* In a short window, the last row fades out while there is more below. */
-         .nevis-settings undershoot.bottom {{ background-image: linear-gradient(to top, {surface}, alpha({surface}, 0));
-             background-size: 100% 32px; background-position: bottom; background-repeat: no-repeat; }}
-         .nevis-settings-about {{ color: {dim}; font-size: 0.88em; }}
-         .nevis-settings-button {{ padding: 4px 14px; min-height: 0; border-radius: 999px; border: none; box-shadow: none;
-             background: alpha({accent}, 0.14); color: {accent}; font-weight: 500; }}
-         .nevis-settings-button:hover {{ background: alpha({accent}, 0.24); }}
+         .nevis-gear {{ margin: 8px 8px 2px 4px; padding: 0 8px; color: {muted}; border-radius: 8px;
+             transition: color 120ms ease, background-color 120ms ease; }}
+         .nevis-gear:hover {{ color: {text}; background-color: alpha({text}, 0.08); }}
+
+         /* Settings: a window of its own, a side menu in the surface colour beside the pages. */
+         .nevis-prefs, .nevis-prefs-pages {{ background: {background}; color: {text}; }}
+         .nevis-prefs-nav {{ background: {surface}; min-width: 200px; border-right: 1px solid alpha({text}, 0.07); }}
+         .nevis-prefs-nav-title {{ font-size: 1.05em; font-weight: 700; padding: 18px 12px 10px 20px; }}
+         .nevis-prefs-list {{ background: transparent; }}
+         .nevis-prefs-list > row {{ border-radius: 8px; margin: 1px 8px; padding: 7px 12px; color: {text}; outline: none; }}
+         .nevis-prefs-list > row:hover:not(:selected) {{ background: alpha({text}, 0.05); }}
+         .nevis-prefs-list > row:selected {{ background: alpha({accent}, 0.12); color: {text}; }}
+         .nevis-prefs-list > row:selected label {{ font-weight: 600; }}
+         .nevis-prefs-list > row:focus-visible {{ outline: 2px solid alpha({accent}, 0.7); outline-offset: -2px; }}
+         .nevis-prefs-foot {{ border-radius: 0; min-height: 0; padding: 10px 20px; background: none; box-shadow: none; border: none;
+             border-top: 1px solid alpha({text}, 0.07); color: {muted}; font-family: monospace; font-size: 0.8em; }}
+         .nevis-prefs-foot:hover {{ background: alpha({text}, 0.05); color: {text}; }}
+         .nevis-prefs-foot > label {{ color: inherit; }}
+         .nevis-prefs-page {{ padding: 28px 36px 36px 36px; }}
+         .nevis-prefs-close {{ margin: 10px 12px; min-width: 30px; min-height: 30px; padding: 0; border-radius: 8px; border: none;
+             box-shadow: none; background: none; color: {muted}; font-size: 1.3em; }}
+         .nevis-prefs-close:hover {{ background: alpha({text}, 0.08); color: {text}; }}
+         .nevis-prefs-close > label {{ color: inherit; }}
+         .nevis-prefs-heading {{ font-size: 1.6em; font-weight: 700; margin-bottom: 4px; }}
+         .nevis-about {{ padding: 64px 32px 32px 32px; }}
+         .nevis-about-name {{ font-size: 2.2em; font-weight: 800; letter-spacing: -0.02em; }}
+         .nevis-about-by, .nevis-about-line {{ color: {muted}; }}
+         .nevis-about-by link, .nevis-about-line link {{ color: inherit; }}
+         .nevis-about-by link:hover, .nevis-about-line link:hover {{ color: {accent}; }}
+         .nevis-about-version {{ color: {muted}; font-family: monospace; font-size: 0.8em; }}
+         .nevis-about-credit {{ font-size: 0.8em; }}
+         .nevis-settings-section {{ color: {muted}; font-size: 0.8em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 22px 0 8px 4px; }}
+         .nevis-settings-group {{ background: alpha({text}, 0.035); border: 1px solid alpha({text}, 0.06); border-radius: 10px; }}
+         .nevis-settings-row {{ padding: 10px 16px; min-height: 32px; border-bottom: 1px solid alpha({text}, 0.05); }}
+         .nevis-settings-row:last-child, .nevis-settings-row.joined {{ border-bottom: none; }}
+         .nevis-settings-about {{ color: {muted}; font-size: 0.8em; }}
+         .nevis-settings-button, .nevis-stepper > button {{ min-height: 28px; padding: 0 10px; border-radius: 8px; border: none;
+             box-shadow: none; background: alpha({text}, 0.06); color: {text}; font-size: 0.9em; font-weight: 500; }}
+         .nevis-settings-button:hover, .nevis-stepper > button:hover {{ background: alpha({text}, 0.12); }}
+         .nevis-stepper > button {{ font-weight: 600; }}
+         .nevis-stepper-value {{ font-feature-settings: \"tnum\"; }}
          .nevis-switch {{ min-width: 36px; min-height: 20px; padding: 0; border-radius: 999px; border: 2px solid transparent;
              background: alpha({text}, 0.16); box-shadow: none; transition: background-color 150ms ease, border-color 150ms ease; }}
          .nevis-switch > .knob {{ min-width: 14px; min-height: 14px; margin-left: 3px; border-radius: 999px; background: {text};
@@ -601,37 +715,46 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-switch:hover {{ background: alpha({text}, 0.24); }}
          .nevis-switch:checked {{ background: {accent}; }}
          .nevis-switch:checked > .knob {{ min-width: 16px; min-height: 16px; margin-left: 16px; background: {on_accent}; }}
-         .nevis-switch:focus-visible, .nevis-segments > button:focus-visible {{ outline: 2px solid alpha({accent}, 0.6); outline-offset: 2px; }}
-         .nevis-segments {{ background: alpha({text}, 0.06); border-radius: 999px; padding: 3px; }}
-         .nevis-segments > button {{ padding: 4px 12px; min-height: 0; border-radius: 999px; border: none; box-shadow: none;
-             background: none; color: {dim}; font-weight: 500; transition: color 120ms ease, background-color 120ms ease; }}
+         /* Choices as one segmented control: a soft track, the chosen one raised. */
+         .nevis-segments {{ background: alpha({text}, 0.06); border-radius: 10px; padding: 2px; }}
+         .nevis-segments > button {{ padding: 3px 12px; min-height: 0; border-radius: 8px; border: none; box-shadow: none;
+             background: none; color: {muted}; font-size: 0.9em; font-weight: 500; transition: color 120ms ease, background-color 120ms ease; }}
          .nevis-segments > button:hover {{ color: {text}; }}
-         .nevis-segments > button:checked {{ background: alpha({accent}, 0.22); color: {text}; }}
-         .nevis-stepper > button {{ padding: 2px 10px; font-weight: 600; }}
-         .nevis-stepper-value {{ font-feature-settings: \"tnum\"; }}
+         .nevis-segments > button:checked {{ background: alpha({text}, 0.14); color: {text}; font-weight: 600;
+             box-shadow: 0 1px 2px alpha(black, 0.25); }}
          /* GTK stylesheets colour the label inside a checked button directly; it follows the button here. */
-         .nevis-segments > button > label, .nevis-settings-button > label {{ color: inherit; font-weight: inherit; }}"
+         .nevis-segments > button > label, .nevis-settings-button > label {{ color: inherit; font-weight: inherit; }}
+         .nevis-themes, .nevis-themes > flowboxchild {{ background: none; padding: 0; }}
+         .nevis-themes {{ padding: 0 10px 10px 10px; }}
+         .nevis-theme-tile {{ padding: 6px 6px 8px 6px; border-radius: 10px; border: none; box-shadow: none; background: none;
+             transition: background-color 120ms ease, box-shadow 120ms ease; }}
+         .nevis-theme-tile:hover {{ background: alpha({text}, 0.06); }}
+         .nevis-theme-tile.on {{ background: alpha({accent}, 0.14); box-shadow: inset 0 0 0 2px {accent}; }}
+         .nevis-theme-name {{ color: {muted}; font-size: 0.8em; }}
+         .nevis-theme-tile.on .nevis-theme-name {{ color: {text}; font-weight: 600; }}"
     )
 }
 
 /// GTK's own widgets in a built-in palette's colours: windows, menus, fields and buttons.
 fn widget_css(c: &Colors) -> String {
     let h = |color: Rgb| color.to_hex();
-    let (background, text, surface, border, accent) = (h(c.background), h(c.text), h(c.surface), h(c.border), h(c.accent));
+    let (background, text, surface, accent) = (h(c.background), h(c.text), h(c.surface), h(c.accent));
     let field = h(c.background.mix(c.text, 0.06));
     let on_accent = h(if c.accent.contrast(Rgb::BLACK) > c.accent.contrast(Rgb::WHITE) { Rgb::BLACK } else { Rgb::WHITE });
     format!(
         "window, window.background, dialog {{ background-color: {background}; color: {text}; }}
-         popover > contents, popover > arrow {{ background-color: {surface}; color: {text}; border-color: {border}; }}
+         popover > contents, popover > arrow {{ background-color: {surface}; color: {text}; border-color: alpha({text}, 0.12); }}
+         popover > contents {{ border-radius: 10px; }}
+         popover modelbutton {{ border-radius: 6px; }}
          popover modelbutton:hover {{ background-color: alpha({text}, 0.08); }}
          entry, text {{ color: {text}; }}
-         entry {{ background-color: {field}; border-color: {border}; }}
-         entry:focus-within {{ outline-color: alpha({accent}, 0.6); }}
-         button {{ color: {text}; background-color: alpha({text}, 0.08); border-color: {border}; }}
-         button:hover {{ background-color: alpha({text}, 0.14); }}
-         button.suggested-action, button.default {{ background-color: {accent}; color: {on_accent}; }}
+         entry {{ background-color: {field}; border-color: alpha({text}, 0.12); border-radius: 8px; }}
+         entry:focus-within {{ outline-color: alpha({accent}, 0.7); }}
+         button {{ color: {text}; background-color: alpha({text}, 0.06); border-color: transparent; border-radius: 8px; }}
+         button:hover {{ background-color: alpha({text}, 0.12); }}
+         button.suggested-action, button.default {{ background-color: alpha({accent}, 0.85); color: {on_accent}; }}
          selection {{ background-color: alpha({accent}, 0.3); }}
-         scrollbar slider {{ background-color: alpha({text}, 0.3); }}"
+         scrollbar slider {{ background-color: alpha({text}, 0.3); border-radius: 999px; }}"
     )
 }
 

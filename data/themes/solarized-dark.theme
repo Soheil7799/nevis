@@ -1,0 +1,16 @@
+# Solarized Dark, built into nevis. Copy it to ~/.config/nevis/themes/ to change it.
+
+name = Solarized Dark
+
+background = #002b36
+foreground = #839496
+surface    = #073642
+accent     = #b58900
+comment    = #586e75
+red        = #dc322f
+orange     = #cb4b16
+yellow     = #b58900
+green      = #859900
+cyan       = #2aa198
+blue       = #268bd2
+purple     = #6c71c4
