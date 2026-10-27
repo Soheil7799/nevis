@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "nevis"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cairo-rs",
  "gio",
