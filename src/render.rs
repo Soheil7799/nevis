@@ -205,11 +205,11 @@ impl Styles {
             emphasis: add(gtk::TextTag::builder().style(pango::Style::Italic).build()),
             strike: add(gtk::TextTag::builder().strikethrough(true).build()),
             // Its background is a chip the view draws (see `Paper::set_chips`).
-            code: add(gtk::TextTag::builder().family(fonts::MONO).foreground(theme::colors().code.to_hex()).build()),
+            code: add(gtk::TextTag::builder().family(fonts::mono()).foreground(theme::colors().code.to_hex()).build()),
             // Its background is a panel (see `Panel`): a paragraph background leaves out blank
             // lines, splitting a block in two.
             code_block: add(gtk::TextTag::builder()
-                .family(fonts::MONO)
+                .family(fonts::mono())
                 .foreground(theme::colors().code.to_hex())
                 .direction(gtk::TextDirection::Ltr)
                 .left_margin(margin + 12)

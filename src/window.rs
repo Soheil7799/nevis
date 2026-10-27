@@ -917,12 +917,7 @@ impl Window {
         let page = match existing {
             Some(page) => page,
             None => {
-                let weak = Rc::downgrade(self);
-                let page = SettingsPage::new(move || {
-                    if let Some(this) = weak.upgrade() {
-                        this.pick_theme();
-                    }
-                });
+                let page = SettingsPage::new();
                 self.add_popup(&page.widget);
                 *self.settings.borrow_mut() = Some(page.clone());
                 page

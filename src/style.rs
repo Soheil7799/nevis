@@ -384,6 +384,9 @@ impl Styler {
             tag.set_paragraph_background_rgba(
                 fresh.is_paragraph_background_set().then(|| fresh.paragraph_background_rgba()).flatten().as_ref(),
             );
+            if fresh.is_family_set() {
+                tag.set_family(fresh.family().as_deref());
+            }
         }
         // Code takes the new scheme's colours, and so do the blocks Live Preview draws.
         self.uncolour();
@@ -560,13 +563,13 @@ fn tag_for(kind: Kind) -> gtk::TextTag {
         // Its background is a panel the view draws (see `update_panels`): a paragraph background
         // leaves out blank lines, splitting a block in two.
         Kind::CodeBlock => gtk::TextTag::builder()
-            .family(theme::fonts::MONO)
+            .family(theme::fonts::mono())
             .foreground(theme::colors().code.to_hex())
             .direction(gtk::TextDirection::Ltr)
             .build(),
-        Kind::Frontmatter | Kind::Html => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().dim.to_hex()).build(),
+        Kind::Frontmatter | Kind::Html => gtk::TextTag::builder().family(theme::fonts::mono()).foreground(theme::colors().dim.to_hex()).build(),
         Kind::Url => gtk::TextTag::builder().foreground(theme::colors().dim.to_hex()).build(),
-        Kind::Table => gtk::TextTag::builder().family(theme::fonts::MONO).build(),
+        Kind::Table => gtk::TextTag::builder().family(theme::fonts::mono()).build(),
         Kind::H1 => heading(1.6),
         Kind::H2 => heading(1.3),
         Kind::H3 => heading(1.12),
@@ -575,11 +578,11 @@ fn tag_for(kind: Kind) -> gtk::TextTag {
         Kind::Strong => gtk::TextTag::builder().weight(700).build(),
         Kind::Emphasis => gtk::TextTag::builder().style(pango::Style::Italic).build(),
         Kind::Strike => gtk::TextTag::builder().strikethrough(true).foreground(theme::colors().dim.to_hex()).build(),
-        Kind::Code => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().code.to_hex()).build(),
+        Kind::Code => gtk::TextTag::builder().family(theme::fonts::mono()).foreground(theme::colors().code.to_hex()).build(),
         Kind::LinkText => gtk::TextTag::builder().foreground(theme::colors().link.to_hex()).underline(pango::Underline::Single).build(),
         Kind::ListMarker => gtk::TextTag::builder().foreground(theme::colors().bullet.to_hex()).weight(700).build(),
         // In the code font: "[x]" as wide as "[ ]", so the box drawn over each sits alike.
-        Kind::Task => gtk::TextTag::builder().family(theme::fonts::MONO).foreground(theme::colors().accent.to_hex()).weight(700).build(),
+        Kind::Task => gtk::TextTag::builder().family(theme::fonts::mono()).foreground(theme::colors().accent.to_hex()).weight(700).build(),
         Kind::Marker => gtk::TextTag::builder().foreground(theme::colors().marker.to_hex()).build(),
     }
 }
