@@ -22,15 +22,62 @@ pub const SYSTEM: &str = "system";
 const SCHEME_ID: &str = "nevis";
 
 
-/// Fonts by role. Vazirmatn follows the code font: without it Persian falls back to a
-/// monospace font that draws the letters unjoined.
+/// Fonts by role: the ones chosen in Settings, or these. Vazirmatn follows the code font:
+/// without it Persian falls back to a monospace font that draws the letters unjoined.
 pub mod fonts {
-    pub const MONO: &str = "JetBrains Mono, Vazirmatn";
+    pub const DEFAULT_MONO: &str = "JetBrains Mono";
+    pub const DEFAULT_BODY: &str = "Inter";
     /// Formulas: fonts that have the mathematical italic letters (𝑥) and the symbols.
     pub const MATH: &str = "DejaVu Math TeX Gyre, Noto Sans Math, DejaVu Serif, serif";
-    /// The rendered view's text (also what Live Preview draws tables in).
-    pub const BODY: &str = "Inter Variable, Inter, Vazirmatn, sans-serif";
+
+    /// The code font, for the source view, code and tables.
+    pub fn mono() -> String {
+        super::with_appearance(|a| match &a.code_font {
+            Some(font) => format!("{font}, Vazirmatn, monospace"),
+            None => "JetBrains Mono, Vazirmatn, monospace".to_owned(),
+        })
+    }
+
+    /// The code font for a stylesheet, before Vazirmatn and the generic family.
+    pub fn mono_css() -> String {
+        super::with_appearance(|a| a.code_font.as_ref().map_or_else(|| "\"JetBrains Mono\"".to_owned(), |font| format!("\"{font}\"")))
+    }
+
+    /// The text font for a stylesheet, before Vazirmatn and the generic family.
+    pub fn body_css() -> String {
+        super::with_appearance(|a| a.text_font.as_ref().map_or_else(|| "\"Inter Variable\", \"Inter\"".to_owned(), |font| format!("\"{font}\"")))
+    }
+
+    /// The rendered view's text (also Live Preview's).
+    pub fn body() -> String {
+        super::with_appearance(|a| match &a.text_font {
+            Some(font) => format!("{font}, Vazirmatn, sans-serif"),
+            None => "Inter Variable, Inter, Vazirmatn, sans-serif".to_owned(),
+        })
+    }
 }
+
+/// Choices on top of the palette: the text colour and the fonts, and the light and the dark
+/// palette the mode switch goes back to. Kept in `~/.config/nevis/appearance`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Appearance {
+    pub text_color: Option<Rgb>,
+    pub text_font: Option<String>,
+    pub code_font: Option<String>,
+    pub light: Option<String>,
+    pub dark: Option<String>,
+}
+
+/// Light and dark versions of the same palette, for the mode switch.
+const PAIRS: &[(&str, &str)] = &[
+    ("adwaita-light", "adwaita-dark"),
+    ("ayu-light", "ayu-mirage"),
+    ("catppuccin-latte", "catppuccin-mocha"),
+    ("github-light", "github-dark"),
+    ("gruvbox-light", "gruvbox-dark"),
+    ("rose-pine-dawn", "rose-pine"),
+    ("solarized-light", "solarized-dark"),
+];
 
 thread_local! {
     static FONT_CSS: gtk::CssProvider = gtk::CssProvider::new();
@@ -43,10 +90,11 @@ thread_local! {
     static CHOICE: RefCell<String> = RefCell::new(SYSTEM.to_owned());
     static COLORS: RefCell<Option<Rc<Colors>>> = const { RefCell::new(None) };
     /// Called after the colours change.
-    static LISTENERS: RefCell<Vec<Rc<dyn Fn()>>> = const { RefCell::new(Vec::new()) };
+    static LISTENERS: RefCell<Vec<Rc<dyn Fn() -> bool>>> = const { RefCell::new(Vec::new()) };
     /// Watching the GTK stylesheets, for System.
     static MONITORS: RefCell<Vec<gio::FileMonitor>> = const { RefCell::new(Vec::new()) };
     static RELOAD_PENDING: Cell<bool> = const { Cell::new(false) };
+    static APPEARANCE: RefCell<Option<Appearance>> = const { RefCell::new(None) };
 }
 
 /// Works out the colours, registers the style scheme and the stylesheets. Call once at startup.
@@ -109,6 +157,23 @@ pub fn choice() -> String {
 
 /// Shows `id`'s palette everywhere; `keep` remembers it for next time too.
 pub fn choose(id: &str, keep: bool) {
+    show(id, keep);
+    if keep && id != SYSTEM {
+        // The mode switch comes back to this palette, and goes to its other version first.
+        let dark = colors().dark;
+        let partner = partner(id);
+        change_appearance(|a| {
+            let (same, other) = if dark { (&mut a.dark, &mut a.light) } else { (&mut a.light, &mut a.dark) };
+            *same = Some(id.to_owned());
+            if let Some(partner) = partner {
+                *other = Some(partner.to_owned());
+            }
+        });
+    }
+}
+
+/// Shows `id`'s palette everywhere; `keep` remembers it for next time too.
+fn show(id: &str, keep: bool) {
     CHOICE.with_borrow_mut(|choice| *choice = id.to_owned());
     if keep {
         let file = choice_file();
@@ -120,13 +185,112 @@ pub fn choose(id: &str, keep: bool) {
     apply(true);
 }
 
+/// The other version, light or dark, of the palette `id`.
+fn partner(id: &str) -> Option<&'static str> {
+    PAIRS.iter().find_map(|&(light, dark)| if id == light { Some(dark) } else if id == dark { Some(light) } else { None })
+}
+
+/// The palette in use is a dark one.
+pub fn is_dark() -> bool {
+    colors().dark
+}
+
+/// Goes to a dark palette, or a light one: the one last chosen of that kind, the other version
+/// of this palette, or Adwaita's.
+pub fn set_dark(dark: bool) {
+    if is_dark() == dark {
+        return;
+    }
+    // Coming back to this mode comes back to this palette, whether it has a partner or not.
+    let leaving = choice();
+    change_appearance(|a| *(if dark { &mut a.light } else { &mut a.dark }) = Some(leaving));
+    let remembered = if dark { appearance().dark } else { appearance().light };
+    let known = |id: &String| id == SYSTEM || palettes::built_in().iter().any(|p| &p.id == id);
+    let fallback = if dark { "adwaita-dark" } else { "adwaita-light" };
+    let id = remembered.filter(known).or_else(|| partner(&choice()).map(str::to_owned)).unwrap_or_else(|| fallback.to_owned());
+    show(&id, true);
+}
+
+/// The text colour, fonts and remembered palettes.
+pub fn appearance() -> Appearance {
+    with_appearance(Appearance::clone)
+}
+
+/// `f` of the appearance, read from its file the first time.
+fn with_appearance<R>(f: impl FnOnce(&Appearance) -> R) -> R {
+    if APPEARANCE.with_borrow(Option::is_none) {
+        APPEARANCE.set(Some(parse_appearance(&std::fs::read_to_string(appearance_file()).unwrap_or_default())));
+    }
+    APPEARANCE.with_borrow(|a| f(a.as_ref().expect("just read")))
+}
+
+/// Changes the text colour, the fonts or the remembered palettes, keeps them for next time,
+/// and repaints.
+pub fn change_appearance(edit: impl FnOnce(&mut Appearance)) {
+    let old = appearance();
+    let mut new = old.clone();
+    edit(&mut new);
+    if new == old {
+        return;
+    }
+    APPEARANCE.set(Some(new.clone()));
+    write_atomically(&appearance_file(), &appearance_text(&new));
+    let fonts = new.text_font != old.text_font || new.code_font != old.code_font;
+    if fonts {
+        apply_font();
+    }
+    if new.text_color != old.text_color {
+        apply(true);
+    } else if fonts {
+        tell();
+    }
+}
+
+fn appearance_file() -> PathBuf {
+    glib::user_config_dir().join("nevis").join("appearance")
+}
+
+/// "name = value" lines; unknown names and values that don't read are left out.
+fn parse_appearance(text: &str) -> Appearance {
+    let mut appearance = Appearance::default();
+    for line in text.lines() {
+        let Some((name, value)) = line.split_once('=') else { continue };
+        let (name, value) = (name.trim(), value.trim());
+        let named = (!value.is_empty()).then(|| value.to_owned());
+        match name {
+            "text-color" => appearance.text_color = Rgb::hex(value),
+            "text-font" => appearance.text_font = named,
+            "code-font" => appearance.code_font = named,
+            "light" => appearance.light = named,
+            "dark" => appearance.dark = named,
+            _ => {}
+        }
+    }
+    appearance
+}
+
+fn appearance_text(a: &Appearance) -> String {
+    let mut text = String::new();
+    let mut line = |name: &str, value: Option<String>| {
+        if let Some(value) = value {
+            text.push_str(&format!("{name} = {value}\n"));
+        }
+    };
+    line("text-color", a.text_color.map(Rgb::to_hex));
+    line("text-font", a.text_font.clone());
+    line("code-font", a.code_font.clone());
+    line("light", a.light.clone());
+    line("dark", a.dark.clone());
+    text
+}
+
 /// Every palette that can be chosen: System first, then the built-in ones.
 pub fn choices() -> Vec<Palette> {
     std::iter::once(palette(SYSTEM)).chain(palettes::built_in()).collect()
 }
 
-/// Runs `f` after every change of colours.
-pub fn on_change(f: impl Fn() + 'static) {
+/// Runs `f` after every change of colours or fonts, for as long as it returns true.
+pub fn on_change(f: impl Fn() -> bool + 'static) {
     LISTENERS.with_borrow_mut(|listeners| listeners.push(Rc::new(f)));
 }
 
@@ -150,7 +314,11 @@ fn palette(id: &str) -> Palette {
 /// Works the colours out again and repaints; `tell` lets open windows know.
 fn apply(tell: bool) {
     let choice = choice();
-    let colors = Rc::new(Colors::from(&palette(&choice)));
+    let mut palette = palette(&choice);
+    if let Some(color) = appearance().text_color {
+        palette.foreground = color;
+    }
+    let colors = Rc::new(Colors::from(&palette));
     let changed = COLORS.with_borrow(|old| old.as_ref().is_none_or(|old| scheme_xml(old) != scheme_xml(&colors)));
     COLORS.with_borrow_mut(|slot| *slot = Some(colors.clone()));
     write_scheme(&colors);
@@ -159,11 +327,15 @@ fn apply(tell: bool) {
     WIDGET_CSS.with(|css| css.load_from_string(&widgets));
     watch_gtk(choice == SYSTEM);
     if tell && changed {
-        let listeners = LISTENERS.with_borrow(|listeners| listeners.clone());
-        for listener in listeners {
-            listener();
-        }
+        self::tell();
     }
+}
+
+/// Lets open windows know the colours or fonts changed, and drops the listeners that are done.
+fn tell() {
+    let listeners = LISTENERS.with_borrow(|listeners| listeners.clone());
+    let done: Vec<_> = listeners.into_iter().filter(|listener| !listener()).collect();
+    LISTENERS.with_borrow_mut(|listeners| listeners.retain(|l| !done.iter().any(|d| Rc::ptr_eq(l, d))));
 }
 
 /// The GTK theme's named colours, and the stylesheets they come from.
@@ -370,6 +542,18 @@ fn chrome_css(c: &Colors) -> String {
          .nevis-switcher-list > row, .nevis-complete-list > row {{ color: {text}; }}
          .nevis-switcher-list > row label:not(.nevis-help-keys), .nevis-complete-list > row label {{ color: inherit; }}
          .nevis-switcher-list > row {{ padding: 6px 8px; border-radius: 8px; }}
+         /* The user's GTK stylesheet may paint list rows in its own (dark) colours: here they
+            are the card's, so a light palette's list stays readable. */
+         .nevis-switcher-list > row:not(:selected), .nevis-complete-list > row:not(:selected) {{ background: transparent; }}
+         .nevis-switcher-list > row:hover:not(:selected), .nevis-complete-list > row:hover:not(:selected) {{ background: alpha({text}, 0.05); }}
+         .nevis-themes, .nevis-themes > flowboxchild {{ background: none; padding: 0; }}
+         .nevis-theme-tile {{ padding: 6px 6px 8px 6px; border-radius: 14px; border: none; box-shadow: none; background: none;
+             transition: background-color 120ms ease, box-shadow 120ms ease; }}
+         .nevis-theme-tile:hover {{ background: alpha({text}, 0.06); }}
+         .nevis-theme-tile.on {{ background: alpha({accent}, 0.14); box-shadow: inset 0 0 0 2px {accent}; }}
+         .nevis-theme-tile:focus-visible {{ outline: 2px solid alpha({accent}, 0.6); outline-offset: 1px; }}
+         .nevis-theme-name {{ color: {dim}; font-size: 0.88em; }}
+         .nevis-theme-tile.on .nevis-theme-name {{ color: {text}; font-weight: 600; }}
          .nevis-switcher-list > row:selected {{ background: alpha({text}, 0.08); color: {text}; }}
          .nevis-prompt-error {{ color: {error}; }}
          .nevis-search-status {{ color: {dim}; font-size: smaller; padding: 0 4px; }}
@@ -460,9 +644,10 @@ pub fn zoom(steps: f64) {
 pub fn apply_font() {
     // Vazirmatn covers Persian, which the Latin fonts lack.
     let size = settings::get().text_size;
+    let (code, body) = (fonts::mono_css(), fonts::body_css());
     let css = format!(
-        "textview.nevis-editor {{ font-family: \"JetBrains Mono\", \"Vazirmatn\", monospace; font-size: {size}pt; }}
-         textview.nevis-editor.nevis-live, textview.nevis-read {{ font-family: \"Inter Variable\", \"Inter\", \"Vazirmatn\", sans-serif; font-size: {size}pt; }}"
+        "textview.nevis-editor {{ font-family: {code}, \"Vazirmatn\", monospace; font-size: {size}pt; }}
+         textview.nevis-editor.nevis-live, textview.nevis-read {{ font-family: {body}, \"Vazirmatn\", sans-serif; font-size: {size}pt; }}"
     );
     FONT_CSS.with(|provider| provider.load_from_string(&css));
 }

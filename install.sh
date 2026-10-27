@@ -8,6 +8,7 @@ cd "$(dirname "$0")"
 
 bindir="$HOME/.local/bin"
 apps="$HOME/.local/share/applications"
+icons="$HOME/.local/share/icons/hicolor"
 units="$HOME/.config/systemd/user"
 
 if [[ -x bin/nevis-app ]]; then
@@ -25,7 +26,9 @@ first_install=true
 [[ -e "$units/nevis.service" ]] && first_install=false
 sed "s|@BINDIR@|$bindir|" data/dev.shirvani.Nevis.desktop.in > "$apps/dev.shirvani.Nevis.desktop"
 sed "s|@BINDIR@|$bindir|" data/nevis.service.in > "$units/nevis.service"
+install -Dm644 data/dev.shirvani.Nevis.svg "$icons/scalable/apps/dev.shirvani.Nevis.svg"
 update-desktop-database -q "$apps" || true
+gtk-update-icon-cache -q -t "$icons" 2>/dev/null || true
 
 if [[ "${NEVIS_DEFAULT:-1}" == 1 ]]; then
     xdg-mime default dev.shirvani.Nevis.desktop text/plain text/markdown text/x-markdown

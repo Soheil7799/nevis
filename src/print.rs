@@ -140,7 +140,7 @@ fn lay_out(layer: &gtk::Overlay, content: &Content<'_>, width: i32) -> (Paper, g
     // The text's font, size and ink under every other tag: GTK gives a view's text its
     // stylesheet's only once the window draws, which a window out of sight doesn't.
     let buffer = view.buffer();
-    let family = if matches!(content, Content::Markdown { .. }) { theme::fonts::BODY } else { theme::fonts::MONO };
+    let family = if matches!(content, Content::Markdown { .. }) { theme::fonts::body() } else { theme::fonts::mono() };
     let ink = gtk::TextTag::builder()
         .family(family)
         .size_points(TEXT_PT)

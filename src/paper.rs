@@ -530,7 +530,7 @@ impl Paper {
     fn body_layout(&self, text: &str) -> pango::Layout {
         let layout = self.create_pango_layout(Some(text));
         let mut font = self.pango_context().font_description().unwrap_or_default();
-        font.set_family(fonts::BODY);
+        font.set_family(&fonts::body());
         layout.set_font_description(Some(&font));
         layout
     }

@@ -917,12 +917,7 @@ impl Window {
         let page = match existing {
             Some(page) => page,
             None => {
-                let weak = Rc::downgrade(self);
-                let page = SettingsPage::new(move || {
-                    if let Some(this) = weak.upgrade() {
-                        this.pick_theme();
-                    }
-                });
+                let page = SettingsPage::new();
                 self.add_popup(&page.widget);
                 *self.settings.borrow_mut() = Some(page.clone());
                 page
@@ -1636,7 +1631,10 @@ pub fn forget(window: &gtk::Window) {
 /// Repaints every tab when the colours change, and applies changed settings everywhere.
 /// Call once at startup.
 pub fn init() {
-    theme::on_change(|| all_editors().iter().for_each(|editor| editor.refresh(true)));
+    theme::on_change(|| {
+        all_editors().iter().for_each(|editor| editor.refresh(true));
+        true
+    });
     settings::on_change(|old, new| {
         if old.text_size != new.text_size {
             theme::apply_font();

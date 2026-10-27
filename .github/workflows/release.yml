@@ -42,7 +42,7 @@ jobs:
           name="nevis-${GITHUB_REF_NAME#v}-x86_64-linux"
           mkdir -p "$name/bin" "$name/data"
           cp target/release/nevis target/release/nevis-app "$name/bin/"
-          cp data/*.in "$name/data/"
+          cp data/*.in data/*.svg "$name/data/"
           cp install.sh README.md LICENSE "$name/"
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"

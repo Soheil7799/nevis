@@ -160,11 +160,13 @@ fn style(light: &Colors, dark: &Colors) -> String {
             h(c.accent)
         )
     };
+    // The fonts chosen in Settings, as the PDF has them.
+    let (body, mono) = (crate::theme::fonts::body_css(), crate::theme::fonts::mono_css());
     format!(
         ":root {{ {} }}
 @media (prefers-color-scheme: dark) {{ :root {{ {} }} }}
 html {{ background: var(--bg); color: var(--text); }}
-body {{ margin: 0; font: 16px/1.6 \"Inter Variable\", Inter, Vazirmatn, system-ui, sans-serif; }}
+body {{ margin: 0; font: 16px/1.6 {body}, Vazirmatn, system-ui, sans-serif; }}
 main {{ max-width: 46rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }}
 /* Each block runs the way its own text does: Persian right to left, English left to right. */
 p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, dt, dd {{ unicode-bidi: plaintext; }}
@@ -172,7 +174,7 @@ h1, h2, h3, h4, h5, h6 {{ color: var(--heading); font-weight: 650; line-height: 
 h1 {{ font-size: 1.6em; margin-top: 0; }} h2 {{ font-size: 1.3em; }} h3 {{ font-size: 1.12em; }}
 h4 {{ font-size: 1em; }} h5, h6 {{ font-size: 1em; color: var(--dim); }}
 a {{ color: var(--link); text-underline-offset: 0.15em; }}
-code, pre {{ font-family: \"JetBrains Mono\", Vazirmatn, monospace; font-size: 0.9em; }}
+code, pre {{ font-family: {mono}, Vazirmatn, monospace; font-size: 0.9em; }}
 code {{ color: var(--code); background: var(--code-bg); padding: 0.1em 0.3em; border-radius: 4px; }}
 pre {{ background: var(--code-bg); padding: 0.8em 1em; border-radius: 8px; overflow-x: auto; direction: ltr; }}
 pre code {{ padding: 0; background: none; }}
