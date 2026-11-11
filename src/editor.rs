@@ -113,6 +113,9 @@ pub struct Editor {
     /// the window to stop changing size.
     reader_margin: Cell<i32>,
     refit_due: RefCell<Option<glib::SourceId>>,
+    /// Where the rendered view goes back to once a new rendering is laid out. Until then the
+    /// view is at the top, so a second rendering in that time must not read its place from it.
+    reader_scroll_due: Cell<Option<f64>>,
     /// Margins wait for the end of a resize, not to change in the middle of laying out.
     fit_queued: Cell<bool>,
     /// From the last session, not loaded yet: that happens the first time the tab is shown.
@@ -258,6 +261,7 @@ impl Editor {
             rerender_due: RefCell::new(None),
             reader_margin: Cell::new(render::MARGIN),
             refit_due: RefCell::new(None),
+            reader_scroll_due: Cell::new(None),
             fit_queued: Cell::new(false),
             restore: RefCell::new(None),
         });
@@ -1316,7 +1320,7 @@ impl Editor {
 
     /// Re-renders the rendered view in place, keeping its scroll position.
     fn rerender(&self) {
-        let scroll = self.reader.vadjustment().map(|a| a.value());
+        let scroll = self.reader_scroll();
         self.render_markdown();
         if self.is_split() {
             let me = self.me.clone();
@@ -1325,9 +1329,29 @@ impl Editor {
                     editor.follow_source();
                 }
             });
-        } else if let (Some(value), Some(adjustment)) = (scroll, self.reader.vadjustment()) {
-            after_next_frame(&self.window, move || adjustment.set_value(value));
+        } else if let Some(value) = scroll {
+            self.restore_reader_scroll(value);
         }
+    }
+
+    /// How far down the rendered view is: where it is going back to, if a rendering has just
+    /// replaced its text (it is at the top until that is laid out).
+    fn reader_scroll(&self) -> Option<f64> {
+        self.reader_scroll_due.get().or_else(|| self.reader.vadjustment().map(|a| a.value()))
+    }
+
+    /// Puts the rendered view back at `value` once its new text is laid out.
+    fn restore_reader_scroll(&self, value: f64) {
+        self.reader_scroll_due.set(Some(value));
+        let me = self.me.clone();
+        after_next_frame(&self.window, move || {
+            let Some(editor) = me.upgrade() else { return };
+            // A later rendering asked for the same place, or a newer one: the last one to run
+            // sets it, and each sets the place still wanted.
+            if let (Some(value), Some(adjustment)) = (editor.reader_scroll_due.take(), editor.reader.vadjustment()) {
+                adjustment.set_value(value);
+            }
+        });
     }
 
     /// The font or the colours changed: renders again what shows rendered.
@@ -1726,7 +1750,7 @@ impl Editor {
         let restore = reload.then(|| Reload {
             cursor: self.buffer.cursor_position(),
             edit_scroll: self.view.vadjustment().map(|a| a.value()),
-            read_scroll: self.reader.vadjustment().map(|a| a.value()),
+            read_scroll: self.reader_scroll(),
         });
         self.view.set_editable(false);
         let loader = sourceview::FileLoader::new(&self.buffer, &self.file);
@@ -1760,12 +1784,12 @@ impl Editor {
             self.render_markdown();
         }
         // Replacing the text scrolls to the top; put both views back where they were.
-        let (view, reader) = (self.view.clone(), self.reader.clone());
+        if let Some(value) = restore.read_scroll {
+            self.restore_reader_scroll(value);
+        }
+        let view = self.view.clone();
         after_next_frame(&self.window, move || {
             if let (Some(value), Some(adjustment)) = (restore.edit_scroll, view.vadjustment()) {
-                adjustment.set_value(value);
-            }
-            if let (Some(value), Some(adjustment)) = (restore.read_scroll, reader.vadjustment()) {
                 adjustment.set_value(value);
             }
         });
